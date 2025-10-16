@@ -1,0 +1,3 @@
+[submodule "lib/libShapeDescriptor"]
+	path = lib/libShapeDescriptor
+	url = https://github.com/klovjan/libShapeDescriptor.git
