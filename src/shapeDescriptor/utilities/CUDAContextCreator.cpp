@@ -56,7 +56,7 @@ void ShapeDescriptor::printGPUProperties(unsigned int deviceIndex) {
 	std::cout << std::endl;
 	std::cout << "Other device info:" << std::endl;
 	std::cout << "\t- Total global memory: " << deviceInfo.totalGlobalMem << std::endl;
-	std::cout << "\t- Clock rate (KHz): " << deviceInfo.clockRate << std::endl;
+	// std::cout << "\t- Clock rate (KHz): " << deviceInfo.clockRate << std::endl;
 	std::cout << "\t- Number of concurrent kernels: " << deviceInfo.concurrentKernels << std::endl;
 	std::cout << "\t- Max grid size: (" << deviceInfo.maxGridSize[0] << ", " << deviceInfo.maxGridSize[1] << ", " << deviceInfo.maxGridSize[2] << ")" << std::endl;
 	std::cout << "\t- Max threads per block dimension: (" << deviceInfo.maxThreadsDim[0] << ", " << deviceInfo.maxThreadsDim[1] << ", " << deviceInfo.maxThreadsDim[2] << ")" << std::endl;
@@ -67,7 +67,7 @@ void ShapeDescriptor::printGPUProperties(unsigned int deviceIndex) {
 	std::cout << "\t- Number of registers per multiprocessor: " << deviceInfo.regsPerMultiprocessor << std::endl;
 	std::cout << "\t- Total constant memory: " << deviceInfo.totalConstMem << std::endl;
 	std::cout << "\t- Warp size measured in threads: " << deviceInfo.warpSize << std::endl;
-	std::cout << "\t- Single to double precision performance ratio: " << deviceInfo.singleToDoublePrecisionPerfRatio << std::endl;
+	// std::cout << "\t- Single to double precision performance ratio: " << deviceInfo.singleToDoublePrecisionPerfRatio << std::endl;
 	std::cout << "\t- Shared memory per block: " << deviceInfo.sharedMemPerBlock << std::endl;
 	std::cout << "\t- Shared memory per multiprocessor: " << deviceInfo.sharedMemPerMultiprocessor << std::endl;
 	std::cout << "\t- L2 Cache size: " << deviceInfo.l2CacheSize << std::endl;
