@@ -4,7 +4,6 @@
 #include <string>
 #include <cmath>
 
-
 namespace ShapeDescriptor {
     namespace cpu {
         struct float3 {

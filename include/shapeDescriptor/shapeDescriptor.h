@@ -123,6 +123,14 @@ namespace ShapeDescriptor {
         cpu::float3 yAxis = {0, 1, 0};
         cpu::float3 zAxis = {0, 0, 1};
     };
+    // Ideally, put LocalReferenceFrame in namespace cpu
+    namespace gpu {
+        struct LocalReferenceFrame {
+            float3 xAxis = {1, 0, 0};
+            float3 yAxis = {0, 1, 0};
+            float3 zAxis = {0, 0, 1};
+        };
+    }
 
     struct QUICCIDescriptorFileHeader {
         std::array<char, 5> fileID;
@@ -601,6 +609,11 @@ namespace ShapeDescriptor {
                 const ShapeDescriptor::cpu::PointCloud& pointCloud,
                 const ShapeDescriptor::cpu::array<ShapeDescriptor::OrientedPoint>& imageOrigins,
                 const std::vector<float>& maxSupportRadius);
+    }
+
+    namespace gpu {
+        ShapeDescriptor::gpu::array<float> computeEigenVectorsMultiple(ShapeDescriptor::gpu::array<float> d_columnMajorMatrices,
+                                         uint32_t nMatrices);
     }
 
     cpu::PointCloud sampleMesh(cpu::Mesh mesh, size_t sampleCount, size_t randomSamplingSeed);
