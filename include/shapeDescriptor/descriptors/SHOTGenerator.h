@@ -211,6 +211,6 @@ namespace ShapeDescriptor {
             SHOTExecutionTimes* executionTimes = nullptr) {
         std::vector<float> radii(descriptorOrigins.length, supportRadius);
 
-        return generateSHOTDescriptorsMultiRadius<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>>(cloud, descriptorOrigins, radii, executionTimes);
+        return generateSHOTDescriptorsMultiRadius<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>(cloud, descriptorOrigins, radii, executionTimes);
     }
 }
