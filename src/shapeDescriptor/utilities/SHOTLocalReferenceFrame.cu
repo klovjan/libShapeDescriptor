@@ -1,18 +1,3 @@
-// Device-side version of computeSHOTReferenceFrames.
-// Note: caller must allocate and pass device pointers for all arrays.
-// - vertices: pointer to pointCloud.vertices (length pointCount)
-// - imageOrigins: pointer to imageOrigins.content (length originCount)
-// - maxSupportRadius: pointer to maxSupportRadius (length originCount)
-// - referenceFrames: output pointer (length originCount)
-// - referenceWeightsZ: temp buffer (length originCount) - must be zero-initialized by caller or will be initialized here
-// - covarianceMatrices: temp buffer (length originCount * 9) - row-major 3x3 per origin (must be initialized by caller or will be initialized here)
-// - directionVotes: temp buffer (length originCount * 2) - must be zero-initialized by caller or will be initialized here
-//
-// This function assumes a device-side eigenvector routine exists:
-//   std::array<ShapeDescriptor::cpu::float3,3> ShapeDescriptor::internal::computeEigenVectorsDevice(const float* matrix3x3_row_major)
-// You must implement/port computeEigenVectorsDevice to run on the device (it is referenced below).
-//
-// Replace or adapt names/types to match your project if needed.
 #include <shapeDescriptor/shapeDescriptor.h>
 
 #ifdef DESCRIPTOR_CUDA_KERNELS_ENABLED
@@ -20,22 +5,6 @@
 #include <helper_math.h>
 #include <cuda_runtime.h>
 #endif
-
-// Helper for 3x3 matrix (row-major) multiplication: C = A * B
-inline __device__ void mat3_mul(const float *A, const float *B, float *C)
-{
-    // A, B, C are pointers to 9 floats, row-major: [ r0c0, r0c1, r0c2, r1c0, ... ]
-    for (int r = 0; r < 3; ++r)
-    {
-        for (int c = 0; c < 3; ++c)
-        {
-            float sum = 0.0f;
-            for (int k = 0; k < 3; ++k)
-                sum += A[r*3 + k] * B[k*3 + c];
-            C[r*3 + c] = sum;
-        }
-    }
-}
 
 // Helper for column-major outer product
 // a is a column vector, b is a row vector
@@ -59,59 +28,49 @@ namespace internal {
         uint32_t pointCount = pointcloud.pointCount;
         uint32_t originCount = imageOrigins.length;
 
-        ShapeDescriptor::gpu::VertexList vertexList = pointcloud.vertices;
+        const ShapeDescriptor::gpu::VertexList &vertexList = pointcloud.vertices;
 
         // Initialize arrays
-        for (uint32_t i = 0; i < originCount; ++i)
-        {
+        for (uint32_t i = 0; i < originCount; ++i) {
             referenceWeightsZ.content[i] = 0.0f;
             // Initialize each covariance matrix to identity matrix
             float *cov = &covarianceMatrices.content[i * 9];
-            cov[0] = 1.0f;
-            cov[1] = 0.0f;
-            cov[2] = 0.0f;
-            cov[3] = 0.0f;
-            cov[4] = 1.0f;
-            cov[5] = 0.0f;
-            cov[6] = 0.0f;
-            cov[7] = 0.0f;
-            cov[8] = 1.0f;
+            cov[0] = 1.0f; cov[1] = 0.0f; cov[2] = 0.0f;
+            cov[3] = 0.0f; cov[4] = 1.0f; cov[5] = 0.0f;
+            cov[6] = 0.0f; cov[7] = 0.0f; cov[8] = 1.0f;
         }
 
         // Compute normalization factors Z
-        for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex)
-        {
+        for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
             float3 point = vertexList.at(pointIndex);
-            for (uint32_t originIndex = 0; originIndex < originCount; ++originIndex)
-            {
+            for (uint32_t originIndex = 0; originIndex < originCount; ++originIndex) {
                 float3 origin = imageOrigins.content[originIndex].vertex;
                 float distance = length(point - origin);
-                float r = maxSupportRadius.content[originIndex];
-                if (distance <= r)
-                {
-                    referenceWeightsZ.content[originIndex] += (r - distance);
+                float R = maxSupportRadius.content[originIndex];
+                if (distance <= R) {
+                    referenceWeightsZ.content[originIndex] += (R - distance);
                 }
             }
         }
 
         // Compute covariance matrices
+        // Suggestion: Do this per origin, then per point instead
+        // That way, we can simply divide by Z at the very end instead
         for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
             float3 point = vertexList.at(pointIndex);
             for (uint32_t originIndex = 0; originIndex < originCount; ++originIndex) {
                 float3 origin = imageOrigins.content[originIndex].vertex;
                 float3 pointDelta = point - origin;
                 float distance = length(pointDelta);
-                // Potentially brutal branch divergence?
-                if (distance > maxSupportRadius.content[originIndex])
-                {
+                // NOTE: Potentially brutal branch divergence?
+                if (distance > maxSupportRadius.content[originIndex]) {
                     continue;
                 }
-
-                // build covarianceDeltaTransposed (row-major)
                 float3 covarianceDelta = {pointDelta.x, pointDelta.y, pointDelta.z};
 
+                float r = maxSupportRadius.content[originIndex];
                 float Z = referenceWeightsZ[originIndex];
-                float relativeDistance = distance * (1.0f / Z);
+                float relativeDistance = (r - distance) * (1.0f / Z);
 
                 // temp = covDelta * covDeltaT
                 float temp[9];
@@ -136,10 +95,9 @@ namespace internal {
         uint32_t pointCount = pointcloud.pointCount;
         uint32_t originCount = imageOrigins.length;
 
-        ShapeDescriptor::gpu::VertexList d_vertexList = pointcloud.vertices;
+        const ShapeDescriptor::gpu::VertexList &vertexList = pointcloud.vertices;
 
-        for (uint32_t originIndex = 0; originIndex < originCount; originIndex++)
-        {
+        for (uint32_t originIndex = 0; originIndex < originCount; originIndex++) {
             // Initialise referenceFrames to eigenVectors' current values
             // NOTE: Probably wildly inefficient
             referenceFrames.content[originIndex].xAxis = float3(
@@ -164,11 +122,11 @@ namespace internal {
 
         // Compute directional votes
         for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
-            float3 point = d_vertexList.at(pointIndex);
+            float3 point = vertexList.at(pointIndex);
             for (uint32_t originIndex = 0; originIndex < originCount; ++originIndex) {
                 float3 origin = imageOrigins.content[originIndex].vertex;
                 float3 pointDelta = point - origin;
-                ShapeDescriptor::gpu::LocalReferenceFrame frame = referenceFrames.content[originIndex];
+                ShapeDescriptor::gpu::LocalReferenceFrame &frame = referenceFrames.content[originIndex];
                 float dotX = dot(frame.xAxis, pointDelta);
                 float dotZ = dot(frame.zAxis, pointDelta);
                 directionVotes.content[2*originIndex + 0] += (dotX > 0.0f) ? 1 : -1;
@@ -177,29 +135,16 @@ namespace internal {
         }
 
         // Apply direction corrections
-        for (uint32_t originIndex = 0; originIndex < originCount; ++originIndex)
-        {
+        for (uint32_t originIndex = 0; originIndex < originCount; ++originIndex) {
             ShapeDescriptor::gpu::LocalReferenceFrame &frame = referenceFrames.content[originIndex];
-            if (directionVotes[2*originIndex + 0] < 0)
-            {
+            if (directionVotes[2*originIndex + 0] < 0) {
                 frame.xAxis *= -1.0f;
             }
-            if (directionVotes[2*originIndex + 1] < 0)
-            {
+            if (directionVotes[2*originIndex + 1] < 0) {
                 frame.zAxis *= -1.0f;
             }
             frame.yAxis = cross(frame.xAxis, frame.zAxis);
         }
-
-        // // DEBUG: Printf contents of referenceFrames
-        // printf("GPU referenceFrames\n");
-        // for(uint32_t i = 0; i < imageOrigins.length; ++i) {
-        //     const ShapeDescriptor::gpu::LocalReferenceFrame frame = referenceFrames.content[i];
-        //     printf("Reference frame %u:\n", i);
-        //     printf("  [ %f, %f, %f ]\n", frame.xAxis.x, frame.xAxis.y, frame.xAxis.z);
-        //     printf("  [ %f, %f, %f ]\n", frame.yAxis.x, frame.yAxis.y, frame.yAxis.z);
-        //     printf("  [ %f, %f, %f ]\n", frame.zAxis.x, frame.zAxis.y, frame.zAxis.z);
-        // }
     }
 
 ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSHOTReferenceFrames(
@@ -225,8 +170,7 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
 
     // Synchronize and check if any errors occurred
     cudaError_t err = cudaDeviceSynchronize();
-    if (err != cudaSuccess)
-    {
+    if (err != cudaSuccess) {
         fprintf(stderr, "Got CUDA error: %s\n", cudaGetErrorString(err));
     }
     std::cout << "Kernel finished -- prepared for EVD" << std::endl;
@@ -242,11 +186,19 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
 
     // Synchronize and check if any errors occurred
     err = cudaDeviceSynchronize();
-    if (err != cudaSuccess)
-    {
+    if (err != cudaSuccess) {
         fprintf(stderr, "Got CUDA error: %s\n", cudaGetErrorString(err));
     }
     std::cout << "Kernel finished -- LRFs generated" << std::endl;
+
+    // Cleanup
+    ShapeDescriptor::free(d_referenceWeightsZ);
+    // NOTE: Since d_covarianceMatrices and d_eigenvectors use the same pointer, this might be free after free
+    // WARNING
+    ShapeDescriptor::free(d_covarianceMatrices);
+    ShapeDescriptor::free(d_eigenvectors);
+    // WARNING
+    ShapeDescriptor::free(d_directionVotes);
 
     return referenceFrames;
 }

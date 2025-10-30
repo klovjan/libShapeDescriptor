@@ -34,7 +34,8 @@ std::vector<ShapeDescriptor::LocalReferenceFrame> ShapeDescriptor::internal::com
                     pointDelta.x,
                     pointDelta.y,
                     pointDelta.z};
-                float relativeDistance = distance * (1.0f / referenceWeightsZ.at(originIndex));
+                
+                float relativeDistance = (maxSupportRadius.at(originIndex) - distance) * (1.0f / referenceWeightsZ.at(originIndex));
                 covarianceMatrices.at(originIndex) += relativeDistance * glm::outerProduct(covarianceDelta, covarianceDelta);
             }
         }
