@@ -123,7 +123,7 @@ namespace ShapeDescriptor {
         cpu::float3 yAxis = {0, 1, 0};
         cpu::float3 zAxis = {0, 0, 1};
     };
-    // Ideally, put LocalReferenceFrame in namespace cpu
+    // Ideally, put above definition of struct LocalReferenceFrame in namespace cpu, for consistency
     namespace gpu {
         struct LocalReferenceFrame {
             float3 xAxis = {1, 0, 0};
@@ -609,6 +609,11 @@ namespace ShapeDescriptor {
                 const ShapeDescriptor::cpu::PointCloud& pointCloud,
                 const ShapeDescriptor::cpu::array<ShapeDescriptor::OrientedPoint>& imageOrigins,
                 const std::vector<float>& maxSupportRadius);
+
+        ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSHOTReferenceFrames(
+            const ShapeDescriptor::gpu::PointCloud& pointcloud,
+            const ShapeDescriptor::gpu::array<OrientedPoint>& imageOrigins,
+            const ShapeDescriptor::gpu::array<float>& maxSupportRadius);
     }
 
     namespace gpu {

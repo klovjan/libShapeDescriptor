@@ -7,8 +7,6 @@
 #include <cusolverDn.h>
 #endif
 
-int foo = 1;
-
 void checkCuSolverStatus(cusolverStatus_t status) {
     if (status != CUSOLVER_STATUS_SUCCESS) {
         fprintf(stderr, "Failed to execute cuSOLVER function!\n");
@@ -42,7 +40,7 @@ __global__ void sortEigenvectors(float *d_allEigenvectors, float *d_allEigenvalu
         return;
 
     float* eigenvectors = d_allEigenvectors + idx * 3 * 3; // pointer to start of idx-th 3x3 matrix
-    float* eigenvalues = d_allEigenvalues + idx * 3;       // eigenvalues for idx-th 3x3 matrix
+    float* eigenvalues = d_allEigenvalues + idx * 3;       // pointer to eigenvalues for idx-th 3x3 matrix
 
     int i0 = 0, i1 = 1, i2 = 2;
     if (eigenvalues[i0] < eigenvalues[i1])
@@ -117,9 +115,9 @@ namespace gpu {
             nMatrices));
 
         // 3. Order the eigenvectors by their lengths (i.e. by their eigenvalues)
-        int block = 128;
-        int grid = (nMatrices + block - 1) / block;
-        sortEigenvectors<<<grid, block>>>(d_columnMajorMatrices.content, d_eigenvalues, nMatrices);
+        int dimBlock = 128;
+        int dimGrid = (nMatrices + dimBlock - 1) / dimBlock;
+        sortEigenvectors<<<dimGrid, dimBlock>>>(d_columnMajorMatrices.content, d_eigenvalues, nMatrices);
 
         // Clean up
         checkCudaErrors(cudaFree(d_eigenvalues));

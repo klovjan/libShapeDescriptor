@@ -30,14 +30,12 @@ std::vector<ShapeDescriptor::LocalReferenceFrame> ShapeDescriptor::internal::com
             ShapeDescriptor::cpu::float3 pointDelta = point - origin;
             float distance = length(pointDelta);
             if(distance <= maxSupportRadius.at(originIndex)) {
-                glm::mat3 covarianceDeltaTransposed = {
-                        pointDelta.x, pointDelta.y, pointDelta.z,
-                        0, 0, 0,
-                        0, 0, 0
-                };
-                glm::mat3 covarianceDelta = glm::transpose(covarianceDeltaTransposed);
+                glm::vec3 covarianceDelta = {
+                    pointDelta.x,
+                    pointDelta.y,
+                    pointDelta.z};
                 float relativeDistance = distance * (1.0f / referenceWeightsZ.at(originIndex));
-                covarianceMatrices.at(originIndex) += relativeDistance * covarianceDelta * covarianceDeltaTransposed;
+                covarianceMatrices.at(originIndex) += relativeDistance * glm::outerProduct(covarianceDelta, covarianceDelta);
             }
         }
     }
