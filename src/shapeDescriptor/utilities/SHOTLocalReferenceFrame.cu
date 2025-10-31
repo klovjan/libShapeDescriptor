@@ -17,7 +17,7 @@ __device__ void outerProduct(const float3& a, const float3& b, float* M) {
 
 namespace ShapeDescriptor {
 namespace internal {
-    __global__ void prepareEVD(
+    __global__ void calculateCovarianceMatrices(
         const ShapeDescriptor::gpu::PointCloud pointcloud,
         const ShapeDescriptor::gpu::array<OrientedPoint> imageOrigins,
         const ShapeDescriptor::gpu::array<float> maxSupportRadius,
@@ -158,26 +158,27 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     ShapeDescriptor::gpu::array<float> d_referenceWeightsZ(originCount);
     ShapeDescriptor::gpu::array<float> d_covarianceMatrices(originCount * 9);
 
-    // Alternative way of zeroing out the reference weights (currently done in prepareEVD)
-    // Might not be necessary at all (if ::gpu::array<>() zeros out by default)
+    // Alternative way of zeroing out the reference weights (currently done in calculateCovarianceMatrices)
+    // Might not be necessary at all (if ::gpu::array<>() zeroes out by default)
     // float zero = 0.0f;
     // d_referenceWeightsZ.setValue(zero);
 
     // Prepare for eigenvalue decomposition:
     // - calculate reference weight Z for each keypoint
     // - calculate covariance matrix for each keypoint
-    prepareEVD<<<1, 1>>>(pointcloud, imageOrigins, maxSupportRadius, d_referenceWeightsZ, d_covarianceMatrices);
+    calculateCovarianceMatrices<<<1, 1>>>(pointcloud, imageOrigins, maxSupportRadius, d_referenceWeightsZ, d_covarianceMatrices);
 
     // Synchronize and check if any errors occurred
     cudaError_t err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         fprintf(stderr, "Got CUDA error: %s\n", cudaGetErrorString(err));
     }
-    std::cout << "Kernel finished -- prepared for EVD" << std::endl;
+    std::cout << "Kernel finished -- covariance matrices calculated" << std::endl;
 
     // Compute initial eigenvectors for all keypoints (origins)
     // Must execute this function in host in order to use cuSOLVER
     ShapeDescriptor::gpu::array<float> d_eigenvectors = ShapeDescriptor::gpu::computeEigenVectorsMultiple(d_covarianceMatrices, originCount);
+    std::cout << "cuSOLVER finished -- eigenvectors calculated" << std::endl;
 
     // Disambiguate eigenvector directions, and put results in referenceFrames array
     ShapeDescriptor::gpu::array<int32_t> d_directionVotes(originCount * 2);
