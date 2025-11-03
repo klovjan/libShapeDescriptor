@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shapeDescriptor/shapeDescriptor.h>
+#include <chrono>
 #include "ShapeContextGenerator.h"
 
 #ifdef DESCRIPTOR_CUDA_KERNELS_ENABLED
@@ -197,14 +198,13 @@ namespace ShapeDescriptor {
             SHOTExecutionTimes* executionTimes = nullptr) {
         gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> descriptors(descriptorOrigins.length);
 
+        // Compute LRFs and SHOT descriptors
         gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames = ShapeDescriptor::internal::computeSHOTReferenceFrames(pointCloud, descriptorOrigins, supportRadii);
-
         internal::computeGeneralisedSHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<1, 1>>>(descriptorOrigins, pointCloud, descriptors, referenceFrames, supportRadii);
 
         // Synchronize and check if any errors occurred
         cudaError_t err = cudaDeviceSynchronize();
-        if (err != cudaSuccess)
-        {
+        if (err != cudaSuccess) {
             fprintf(stderr, "Got CUDA error: %s\n", cudaGetErrorString(err));
         }
         std::cout << "Kernel finished -- all SHOT descriptors generated on GPU" << std::endl;

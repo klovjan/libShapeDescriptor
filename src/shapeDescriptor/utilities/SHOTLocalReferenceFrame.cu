@@ -194,11 +194,7 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
 
     // Cleanup
     ShapeDescriptor::free(d_referenceWeightsZ);
-    // NOTE: Since d_covarianceMatrices and d_eigenvectors use the same pointer, this might be free after free
-    // WARNING
-    ShapeDescriptor::free(d_covarianceMatrices);
     ShapeDescriptor::free(d_eigenvectors);
-    // WARNING
     ShapeDescriptor::free(d_directionVotes);
 
     return referenceFrames;
