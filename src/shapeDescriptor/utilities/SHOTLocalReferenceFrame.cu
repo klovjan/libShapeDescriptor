@@ -17,6 +17,8 @@ __device__ void outerProduct(const float3& a, const float3& b, float* M) {
 
 namespace ShapeDescriptor {
 namespace internal {
+    // WARNING: Function causes somewhat significant divergence in results from CPU (worst case ~3 %)
+    // Possible cause: floating point addition order
     __global__ void calculateCovarianceMatrices(
         const ShapeDescriptor::gpu::PointCloud pointcloud,
         const ShapeDescriptor::gpu::array<OrientedPoint> imageOrigins,
@@ -26,61 +28,64 @@ namespace internal {
     )
     {
         uint32_t pointCount = pointcloud.pointCount;
-        uint32_t originCount = imageOrigins.length;
 
         const ShapeDescriptor::gpu::VertexList &vertexList = pointcloud.vertices;
 
-        // Initialize arrays
-        for (uint32_t i = 0; i < originCount; ++i) {
-            referenceWeightsZ.content[i] = 0.0f;
+        // Hand out a descriptor origin to each block
+        uint32_t originIndex = blockIdx.x;
+
+        // Initialize arrays to 0 / identity matrix
+        if (threadIdx.x == 0) {
+            referenceWeightsZ.content[originIndex] = 0.0f;
             // Initialize each covariance matrix to identity matrix
-            float *cov = &covarianceMatrices.content[i * 9];
+            float *cov = &covarianceMatrices.content[originIndex * 9];
             cov[0] = 1.0f; cov[1] = 0.0f; cov[2] = 0.0f;
             cov[3] = 0.0f; cov[4] = 1.0f; cov[5] = 0.0f;
             cov[6] = 0.0f; cov[7] = 0.0f; cov[8] = 1.0f;
         }
+        __syncthreads();
 
         // Compute normalization factors Z
-        for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
+        for (uint32_t pointIndex = threadIdx.x; pointIndex < pointCount; pointIndex += blockDim.x) {
             float3 point = vertexList.at(pointIndex);
-            for (uint32_t originIndex = 0; originIndex < originCount; ++originIndex) {
-                float3 origin = imageOrigins.content[originIndex].vertex;
-                float distance = length(point - origin);
-                float R = maxSupportRadius.content[originIndex];
-                if (distance <= R) {
-                    referenceWeightsZ.content[originIndex] += (R - distance);
-                }
+
+            float3 origin = imageOrigins.content[originIndex].vertex;
+            float distance = length(point - origin);
+            float R = maxSupportRadius.content[originIndex];
+            if (distance <= R) {
+                atomicAdd_block(&referenceWeightsZ.content[originIndex], R - distance);
             }
         }
+        __syncthreads();
 
         // Compute covariance matrices
         // Suggestion: Do this per origin, then per point instead
         // That way, we can simply divide by Z at the very end instead
-        for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
+        for (uint32_t pointIndex = threadIdx.x; pointIndex < pointCount; pointIndex += blockDim.x) {
             float3 point = vertexList.at(pointIndex);
-            for (uint32_t originIndex = 0; originIndex < originCount; ++originIndex) {
-                float3 origin = imageOrigins.content[originIndex].vertex;
-                float3 pointDelta = point - origin;
-                float distance = length(pointDelta);
-                // NOTE: Potentially brutal branch divergence?
-                if (distance > maxSupportRadius.content[originIndex]) {
-                    continue;
-                }
-                float3 covarianceDelta = {pointDelta.x, pointDelta.y, pointDelta.z};
 
-                float r = maxSupportRadius.content[originIndex];
-                float Z = referenceWeightsZ[originIndex];
-                float relativeDistance = (r - distance) * (1.0f / Z);
+            float3 origin = imageOrigins.content[originIndex].vertex;
+            float3 pointDelta = point - origin;
+            float distance = length(pointDelta);
+            float R = maxSupportRadius.content[originIndex];
 
-                // temp = covDelta * covDeltaT
-                float temp[9];
-                outerProduct(covarianceDelta, covarianceDelta, temp);
+            // NOTE: Potentially brutal branch divergence?
+            if (distance > R) {
+                continue;
+            }
 
-                float *cov = &covarianceMatrices.content[originIndex * 9];
-                for (int i = 0; i < 9; ++i) {
-                    // Fill the covariance matrices
-                    cov[i] += relativeDistance * temp[i];
-                }
+            float3 covarianceDelta = {pointDelta.x, pointDelta.y, pointDelta.z};
+
+            float Z = referenceWeightsZ[originIndex];
+            float relativeDistance = (R - distance) * (1.0f / Z);
+
+            float temp[9];
+            outerProduct(covarianceDelta, covarianceDelta, temp);
+
+            float *cov = &covarianceMatrices.content[originIndex * 9];
+            for (int i = 0; i < 9; ++i) {
+                // Fill the covariance matrices
+                atomicAdd_block(&cov[i], relativeDistance * temp[i]);
             }
         }
     }
@@ -93,11 +98,13 @@ namespace internal {
         ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames)
     {
         uint32_t pointCount = pointcloud.pointCount;
-        uint32_t originCount = imageOrigins.length;
 
         const ShapeDescriptor::gpu::VertexList &vertexList = pointcloud.vertices;
 
-        for (uint32_t originIndex = 0; originIndex < originCount; originIndex++) {
+        // Hand out a descriptor origin to each block
+        uint32_t originIndex = blockIdx.x;
+
+        if (threadIdx.x == 0) {
             // Initialise referenceFrames to eigenVectors' current values
             // NOTE: Probably wildly inefficient
             referenceFrames.content[originIndex].xAxis = float3(
@@ -115,27 +122,28 @@ namespace internal {
                 d_eigenvectors[originIndex*9 + 7],
                 d_eigenvectors[originIndex*9 + 8]);
 
-            // Zero out directionVotes (although allocation may already have done this)
+            // Zero out directionVotes
             directionVotes.content[2*originIndex + 0] = 0;
             directionVotes.content[2*originIndex + 1] = 0;
         }
+        __syncthreads();
 
         // Compute directional votes
-        for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
+        for (uint32_t pointIndex = threadIdx.x; pointIndex < pointCount; pointIndex += blockDim.x) {
             float3 point = vertexList.at(pointIndex);
-            for (uint32_t originIndex = 0; originIndex < originCount; ++originIndex) {
-                float3 origin = imageOrigins.content[originIndex].vertex;
-                float3 pointDelta = point - origin;
-                ShapeDescriptor::gpu::LocalReferenceFrame &frame = referenceFrames.content[originIndex];
-                float dotX = dot(frame.xAxis, pointDelta);
-                float dotZ = dot(frame.zAxis, pointDelta);
-                directionVotes.content[2*originIndex + 0] += (dotX > 0.0f) ? 1 : -1;
-                directionVotes.content[2*originIndex + 1] += (dotZ > 0.0f) ? 1 : -1;
-            }
+
+            float3 origin = imageOrigins.content[originIndex].vertex;
+            float3 pointDelta = point - origin;
+            ShapeDescriptor::gpu::LocalReferenceFrame &frame = referenceFrames.content[originIndex];
+            float dotX = dot(frame.xAxis, pointDelta);
+            float dotZ = dot(frame.zAxis, pointDelta);
+            atomicAdd_block(&directionVotes.content[2*originIndex + 0], (dotX > 0.0f) ? 1 : -1);
+            atomicAdd_block(&directionVotes.content[2*originIndex + 1], (dotZ > 0.0f) ? 1 : -1);
         }
+        __syncthreads();
 
         // Apply direction corrections
-        for (uint32_t originIndex = 0; originIndex < originCount; ++originIndex) {
+        if (threadIdx.x == 0) {
             ShapeDescriptor::gpu::LocalReferenceFrame &frame = referenceFrames.content[originIndex];
             if (directionVotes[2*originIndex + 0] < 0) {
                 frame.xAxis *= -1.0f;
@@ -166,7 +174,8 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     // Prepare for eigenvalue decomposition:
     // - calculate reference weight Z for each keypoint
     // - calculate covariance matrix for each keypoint
-    calculateCovarianceMatrices<<<1, 1>>>(pointcloud, imageOrigins, maxSupportRadius, d_referenceWeightsZ, d_covarianceMatrices);
+    // NOTE: Voodoo threads-per-block number 416 used for now (13 warps) (arbitrarily borrowed from spinImageGenerator.cu)
+    calculateCovarianceMatrices<<<originCount, 416>>>(pointcloud, imageOrigins, maxSupportRadius, d_referenceWeightsZ, d_covarianceMatrices);
 
     // Synchronize and check if any errors occurred
     cudaError_t err = cudaDeviceSynchronize();
@@ -183,7 +192,8 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     // Disambiguate eigenvector directions, and put results in referenceFrames array
     ShapeDescriptor::gpu::array<int32_t> d_directionVotes(originCount * 2);
     ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames(originCount);
-    disambiguateEigenvectors<<<1, 1>>>(pointcloud, imageOrigins, d_eigenvectors, d_directionVotes, referenceFrames);
+    // NOTE: Voodoo threads-per-block number 416 used for now (13 warps) (arbitrarily borrowed from spinImageGenerator.cu)
+    disambiguateEigenvectors<<<originCount, 416>>>(pointcloud, imageOrigins, d_eigenvectors, d_directionVotes, referenceFrames);
 
     // Synchronize and check if any errors occurred
     err = cudaDeviceSynchronize();
