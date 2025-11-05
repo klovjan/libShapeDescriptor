@@ -33,12 +33,14 @@ namespace internal {
 
         // Hand out a descriptor origin to each block
         uint32_t originIndex = blockIdx.x;
+        float3 origin = imageOrigins.content[originIndex].vertex;
+        float R = maxSupportRadius.content[originIndex];
+        float *cov = &covarianceMatrices.content[originIndex * 9];
 
         // Initialize arrays to 0 / identity matrix
         if (threadIdx.x == 0) {
             referenceWeightsZ.content[originIndex] = 0.0f;
             // Initialize each covariance matrix to identity matrix
-            float *cov = &covarianceMatrices.content[originIndex * 9];
             cov[0] = 1.0f; cov[1] = 0.0f; cov[2] = 0.0f;
             cov[3] = 0.0f; cov[4] = 1.0f; cov[5] = 0.0f;
             cov[6] = 0.0f; cov[7] = 0.0f; cov[8] = 1.0f;
@@ -49,9 +51,7 @@ namespace internal {
         for (uint32_t pointIndex = threadIdx.x; pointIndex < pointCount; pointIndex += blockDim.x) {
             float3 point = vertexList.at(pointIndex);
 
-            float3 origin = imageOrigins.content[originIndex].vertex;
             float distance = length(point - origin);
-            float R = maxSupportRadius.content[originIndex];
             if (distance <= R) {
                 atomicAdd_block(&referenceWeightsZ.content[originIndex], R - distance);
             }
@@ -61,28 +61,26 @@ namespace internal {
         // Compute covariance matrices
         // Suggestion: Do this per origin, then per point instead
         // That way, we can simply divide by Z at the very end instead
+        float Z = referenceWeightsZ[originIndex];
         for (uint32_t pointIndex = threadIdx.x; pointIndex < pointCount; pointIndex += blockDim.x) {
             float3 point = vertexList.at(pointIndex);
 
-            float3 origin = imageOrigins.content[originIndex].vertex;
             float3 pointDelta = point - origin;
             float distance = length(pointDelta);
-            float R = maxSupportRadius.content[originIndex];
 
             // NOTE: Potentially brutal branch divergence?
+            // Potential solution: Store PCLs in a more sensible format
             if (distance > R) {
                 continue;
             }
 
             float3 covarianceDelta = {pointDelta.x, pointDelta.y, pointDelta.z};
 
-            float Z = referenceWeightsZ[originIndex];
             float relativeDistance = (R - distance) * (1.0f / Z);
 
             float temp[9];
             outerProduct(covarianceDelta, covarianceDelta, temp);
 
-            float *cov = &covarianceMatrices.content[originIndex * 9];
             for (int i = 0; i < 9; ++i) {
                 // Fill the covariance matrices
                 atomicAdd_block(&cov[i], relativeDistance * temp[i]);
@@ -103,6 +101,7 @@ namespace internal {
 
         // Hand out a descriptor origin to each block
         uint32_t originIndex = blockIdx.x;
+        float3 origin = imageOrigins.content[originIndex].vertex;
 
         if (threadIdx.x == 0) {
             // Initialise referenceFrames to eigenVectors' current values
@@ -132,7 +131,6 @@ namespace internal {
         for (uint32_t pointIndex = threadIdx.x; pointIndex < pointCount; pointIndex += blockDim.x) {
             float3 point = vertexList.at(pointIndex);
 
-            float3 origin = imageOrigins.content[originIndex].vertex;
             float3 pointDelta = point - origin;
             ShapeDescriptor::gpu::LocalReferenceFrame &frame = referenceFrames.content[originIndex];
             float dotX = dot(frame.xAxis, pointDelta);
