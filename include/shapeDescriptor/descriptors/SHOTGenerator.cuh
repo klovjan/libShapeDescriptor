@@ -93,7 +93,9 @@ namespace internal {
                 verticalDirection = normalize(verticalDirection);
 
                 const float3 sampleNormal = normalize(pointCloud.normals.at(sampleIndex));
-                float normalCosine = dot(sampleNormal, normalize(originNormal));
+                // float normalCosine = dot(sampleNormal, originNormal);
+                float normalCosine = dot(sampleNormal, localReferenceFrames.content[descriptorIndex].zAxis);
+
 
                 // For the interpolations we'll use the order used in the paper
                 // a) Interpolation on normal cosines
@@ -108,8 +110,10 @@ namespace internal {
                 } else {
                     cosineHistogramNeighbourBinIndex = INTERNAL_HISTOGRAM_BINS - 1;
                 }
-                float cosineHistogramBinContribution = std::abs(cosineHistogramDelta);
+                float cosineHistogramBinContribution = abs(cosineHistogramDelta);
                 float cosineHistogramNeighbourBinContribution = 1.0f - cosineHistogramBinContribution;
+                // float cosineHistogramBinContribution = 1.0f - abs(cosineHistogramDelta);
+                // float cosineHistogramNeighbourBinContribution = 1.0f - cosineHistogramBinContribution;
 
                 // b) Interpolation on azimuth
                 float azimuthAnglePosition = (internal::absoluteAngle(horizontalDirection.y, horizontalDirection.x) / (2.0f * float(M_PI))) * float(AZIMUTH_DIVISIONS);
@@ -128,8 +132,10 @@ namespace internal {
                 } else {
                     azimuthNeighbourBinIndex = AZIMUTH_DIVISIONS - 1;
                 }
-                float azimuthBinContribution = std::abs(azimuthHistogramDelta);
+                float azimuthBinContribution = abs(azimuthHistogramDelta);
                 float azimuthNeighbourBinContribution = 1.0f - azimuthBinContribution;
+                // float azimuthBinContribution = 1.0f - abs(azimuthHistogramDelta);
+                // float azimuthNeighbourBinContribution = 1.0f - azimuthBinContribution;
 
 
                 // c) Interpolation on elevation
@@ -145,6 +151,8 @@ namespace internal {
                 }
                 float elevationBinContribution = abs(elevationHistogramDelta);
                 float elevationNeighbourBinContribution = 1.0f - elevationBinContribution;
+                // float elevationBinContribution = 1.0f - abs(elevationHistogramDelta);
+                // float elevationNeighbourBinContribution = 1.0f - elevationBinContribution;
 
 
                 // d) Interpolation on distance
@@ -163,12 +171,17 @@ namespace internal {
                 }
                 float radialBinContribution = abs(radialHistogramDelta);
                 float radialNeighbourBinContribution = 1.0f - radialBinContribution;
+                // float radialBinContribution = 1.0f - abs(radialHistogramDelta);
+                // float radialNeighbourBinContribution = 1.0f - radialBinContribution;
 
 
                 // Increment bins
                 float primaryBinContribution = cosineHistogramBinContribution + azimuthBinContribution + elevationBinContribution + radialBinContribution;
                 incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramBinIndex, primaryBinContribution);
+
                 incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationNeighbourBinContribution, radialBinIndex, azimuthBinIndex, cosineHistogramBinIndex, elevationNeighbourBinContribution);
+                // incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationNeighbourBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramBinIndex, elevationNeighbourBinContribution);
+
                 incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialNeighbourBinIndex, azimuthBinIndex, cosineHistogramBinIndex, radialNeighbourBinContribution);
                 incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialBinIndex, azimuthNeighbourBinIndex, cosineHistogramBinIndex, azimuthNeighbourBinContribution);
                 incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramNeighbourBinIndex, cosineHistogramNeighbourBinContribution);

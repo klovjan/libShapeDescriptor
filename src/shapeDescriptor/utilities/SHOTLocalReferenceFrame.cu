@@ -91,7 +91,8 @@ namespace internal {
     __global__ void disambiguateEigenvectors(
         const ShapeDescriptor::gpu::PointCloud pointcloud,
         const ShapeDescriptor::gpu::array<OrientedPoint> imageOrigins,
-        ShapeDescriptor::gpu::array<float> d_eigenvectors,
+        const ShapeDescriptor::gpu::array<float> maxSupportRadius,
+        ShapeDescriptor::gpu::array<float> eigenvectors,
         ShapeDescriptor::gpu::array<int32_t> directionVotes,   // length originCount * 2
         ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames)
     {
@@ -107,19 +108,19 @@ namespace internal {
             // Initialise referenceFrames to eigenVectors' current values
             // NOTE: Probably wildly inefficient
             referenceFrames.content[originIndex].xAxis = float3(
-                d_eigenvectors[originIndex*9 + 0],
-                d_eigenvectors[originIndex*9 + 1],
-                d_eigenvectors[originIndex*9 + 2]);
+                eigenvectors[originIndex*9 + 0],
+                eigenvectors[originIndex*9 + 1],
+                eigenvectors[originIndex*9 + 2]);
 
             referenceFrames.content[originIndex].yAxis = float3(
-                d_eigenvectors[originIndex*9 + 3],
-                d_eigenvectors[originIndex*9 + 4],
-                d_eigenvectors[originIndex*9 + 5]);
+                eigenvectors[originIndex*9 + 3],
+                eigenvectors[originIndex*9 + 4],
+                eigenvectors[originIndex*9 + 5]);
             
             referenceFrames.content[originIndex].zAxis = float3(
-                d_eigenvectors[originIndex*9 + 6],
-                d_eigenvectors[originIndex*9 + 7],
-                d_eigenvectors[originIndex*9 + 8]);
+                eigenvectors[originIndex*9 + 6],
+                eigenvectors[originIndex*9 + 7],
+                eigenvectors[originIndex*9 + 8]);
 
             // Zero out directionVotes
             directionVotes.content[2*originIndex + 0] = 0;
@@ -132,6 +133,10 @@ namespace internal {
             float3 point = vertexList.at(pointIndex);
 
             float3 pointDelta = point - origin;
+            // if (length(pointDelta) > maxSupportRadius.content[originIndex]) {
+            //     continue;
+            // }
+
             ShapeDescriptor::gpu::LocalReferenceFrame &frame = referenceFrames.content[originIndex];
             float dotX = dot(frame.xAxis, pointDelta);
             float dotZ = dot(frame.zAxis, pointDelta);
@@ -164,11 +169,6 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     ShapeDescriptor::gpu::array<float> d_referenceWeightsZ(originCount);
     ShapeDescriptor::gpu::array<float> d_covarianceMatrices(originCount * 9);
 
-    // Alternative way of zeroing out the reference weights (currently done in calculateCovarianceMatrices)
-    // Might not be necessary at all (if ::gpu::array<>() zeroes out by default)
-    // float zero = 0.0f;
-    // d_referenceWeightsZ.setValue(zero);
-
     // Prepare for eigenvalue decomposition:
     // - calculate reference weight Z for each keypoint
     // - calculate covariance matrix for each keypoint
@@ -189,9 +189,9 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
 
     // Disambiguate eigenvector directions, and put results in referenceFrames array
     ShapeDescriptor::gpu::array<int32_t> d_directionVotes(originCount * 2);
-    ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames(originCount);
+    ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> d_referenceFrames(originCount);
     // NOTE: Voodoo threads-per-block number 416 used for now (13 warps) (arbitrarily borrowed from spinImageGenerator.cu)
-    disambiguateEigenvectors<<<originCount, 416>>>(pointcloud, imageOrigins, d_eigenvectors, d_directionVotes, referenceFrames);
+    disambiguateEigenvectors<<<originCount, 416>>>(pointcloud, imageOrigins, maxSupportRadius, d_eigenvectors, d_directionVotes, d_referenceFrames);
 
     // Synchronize and check if any errors occurred
     err = cudaDeviceSynchronize();
@@ -205,7 +205,7 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     ShapeDescriptor::free(d_eigenvectors);
     ShapeDescriptor::free(d_directionVotes);
 
-    return referenceFrames;
+    return d_referenceFrames;
 }
 }
 }
