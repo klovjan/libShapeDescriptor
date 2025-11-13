@@ -203,12 +203,15 @@ namespace internal {
             gpu::PointCloud pointCloud,
             gpu::array<OrientedPoint> descriptorOrigins,
             gpu::array<float> supportRadii,
-            double *averageExecutionTimePtr = nullptr) {
+            SHOTExecutionTimes* executionTimes = nullptr) {
         gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> descriptors(descriptorOrigins.length);
 
-        // Compute LRFs and SHOT descriptors
-        gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames = ShapeDescriptor::internal::computeSHOTReferenceFrames(pointCloud, descriptorOrigins, supportRadii);
-        // NOTE: Voodoo threads-per-block number 416 used for now (13 warps) (arbitrarily borrowed from spinImageGenerator.cu)
+        // Compute LRFs
+        gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames = ShapeDescriptor::internal::computeSHOTReferenceFrames(pointCloud, descriptorOrigins, supportRadii, executionTimes);
+
+        // Start descriptor timing
+        auto startDescriptorTime = std::chrono::high_resolution_clock::now();
+        // Compute SHOT descriptors
         internal::computeGeneralisedSHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<descriptorOrigins.length, 416>>>(descriptorOrigins, pointCloud, descriptors, referenceFrames, supportRadii);
 
         // Synchronize and check if any errors occurred
@@ -218,6 +221,22 @@ namespace internal {
         }
         std::cout << "Kernel finished -- all SHOT descriptors generated on GPU" << std::endl;
 
+        // End Descriptor timing
+        auto endDescriptorTime = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> descriptorDuration = endDescriptorTime - startDescriptorTime;
+        double descriptorTimeElapsedSeconds = descriptorDuration.count();
+
+        if (executionTimes != nullptr) {
+            // Calculate LRF generation time as sum of granular parts
+            executionTimes->LRFGenerationTimeSeconds = executionTimes->covarianceMatricesGenerationTimeSeconds
+                + executionTimes->EVDCalculationTimeSeconds + executionTimes->eigenvectorDisambiguationTimeSeconds;
+
+            executionTimes->descriptorCalculationTimeSeconds = descriptorTimeElapsedSeconds;
+
+            // Calculate total execution time as sum of LRF and descriptor parts
+            executionTimes->totalExecutionTimeSeconds = executionTimes->LRFGenerationTimeSeconds + descriptorTimeElapsedSeconds;
+        }
+
         return descriptors;
     }
 
@@ -226,10 +245,10 @@ namespace internal {
             gpu::PointCloud pointCloud,
             gpu::array<OrientedPoint> descriptorOrigins,
             float supportRadius,
-            double *averageExecutionTimePtr = nullptr) {
+            SHOTExecutionTimes* executionTimes = nullptr) {
         gpu::array<float> radii(descriptorOrigins.length);
         radii.setValue(supportRadius);
 
-        return generateSHOTDescriptorsMultiRadius<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>(pointCloud, descriptorOrigins, radii, averageExecutionTimePtr);
+        return generateSHOTDescriptorsMultiRadius<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>(pointCloud, descriptorOrigins, radii, executionTimes);
     }
 }

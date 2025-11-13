@@ -156,23 +156,26 @@ namespace internal {
 ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSHOTReferenceFrames(
     const ShapeDescriptor::gpu::PointCloud& pointcloud,
     const ShapeDescriptor::gpu::array<ShapeDescriptor::OrientedPoint>& imageOrigins,
-    const ShapeDescriptor::gpu::array<float>& maxSupportRadius)
+    const ShapeDescriptor::gpu::array<float>& maxSupportRadius,
+    SHOTExecutionTimes* executionTimes = nullptr)
 {
+    // // -----------------------------------------------------------------------
+    // // Start LRF timing
+    // auto startLRFTime = std::chrono::high_resolution_clock::now();
+    // // -----------------------------------------------------------------------
+
     uint32_t originCount = imageOrigins.length;
+
+
+    // ----------------------- Covariance matrices ----------------------- 
+    // Start covariance timing
+    auto startCovarianceTime = std::chrono::high_resolution_clock::now();
 
     // Allocate GPU memory for temporary matrices
     ShapeDescriptor::gpu::array<float> d_referenceWeightsZ(originCount);
     ShapeDescriptor::gpu::array<float> d_covarianceMatrices(originCount * 9);
 
-    // Alternative way of zeroing out the reference weights (currently done in calculateCovarianceMatrices)
-    // Might not be necessary at all (if ::gpu::array<>() zeroes out by default)
-    // float zero = 0.0f;
-    // d_referenceWeightsZ.setValue(zero);
-
-    // Prepare for eigenvalue decomposition:
-    // - calculate reference weight Z for each keypoint
-    // - calculate covariance matrix for each keypoint
-    // NOTE: Voodoo threads-per-block number 416 used for now (13 warps) (arbitrarily borrowed from spinImageGenerator.cu)
+    // Calculate SHOT's "covariance matrices"
     calculateCovarianceMatrices<<<originCount, 416>>>(pointcloud, imageOrigins, maxSupportRadius, d_referenceWeightsZ, d_covarianceMatrices);
 
     // Synchronize and check if any errors occurred
@@ -182,15 +185,39 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     }
     std::cout << "Kernel finished -- covariance matrices calculated" << std::endl;
 
-    // Compute initial eigenvectors for all keypoints (origins)
-    // Must execute this function in host in order to use cuSOLVER
-    ShapeDescriptor::gpu::array<float> d_eigenvectors = ShapeDescriptor::gpu::computeEigenVectorsMultiple(d_covarianceMatrices, originCount);
-    std::cout << "cuSOLVER finished -- eigenvectors calculated" << std::endl;
+    // End covariance timing
+    auto endCovarianceTime = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> covarianceDuration = endCovarianceTime - startCovarianceTime;
+    double covarianceTimeElapsedSeconds = covarianceDuration.count();
+    // ----------------------- Covariance matrices ----------------------- 
 
-    // Disambiguate eigenvector directions, and put results in referenceFrames array
+
+
+    // ------------------------------- EVD -------------------------------
+    // Start EVD timing
+    auto startEVDTime = std::chrono::high_resolution_clock::now();
+
+    // Compute initial eigenvectors for all keypoints (origins)
+    ShapeDescriptor::gpu::array<float> d_eigenvectors = ShapeDescriptor::gpu::computeEigenVectorsMultiple(d_covarianceMatrices, originCount);
+
+    // End EVD timing
+    auto endEVDTime = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> EVDDuration = endEVDTime - startEVDTime;
+    double EVDTimeElapsedSeconds = EVDDuration.count();
+
+    std::cout << "cuSOLVER finished -- eigenvectors calculated" << std::endl;
+    // ------------------------------- EVD -------------------------------
+
+
+
+    // -------------------- Eigenvector disambiguation -------------------
+    std::cout << "cuSOLVER finished -- eigenvectors calculated" << std::endl;
     ShapeDescriptor::gpu::array<int32_t> d_directionVotes(originCount * 2);
     ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames(originCount);
-    // NOTE: Voodoo threads-per-block number 416 used for now (13 warps) (arbitrarily borrowed from spinImageGenerator.cu)
+    // Start disambiguation timing
+    auto startDisambiguationTime = std::chrono::high_resolution_clock::now();
+
+    // Disambiguate eigenvector directions, and put results in referenceFrames array
     disambiguateEigenvectors<<<originCount, 416>>>(pointcloud, imageOrigins, d_eigenvectors, d_directionVotes, referenceFrames);
 
     // Synchronize and check if any errors occurred
@@ -200,10 +227,34 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     }
     std::cout << "Kernel finished -- LRFs generated" << std::endl;
 
+    // End disambiguation timing
+    auto endDisambiguationTime = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> disambiguationDuration = endDisambiguationTime - startDisambiguationTime;
+    double disambiguationTimeElapsedSeconds = disambiguationDuration.count();
+    // -------------------- Eigenvector disambiguation -------------------
+
+
+
+    // Store timing results, if applicable
+    if (executionTimes != nullptr) {
+        executionTimes->covarianceMatricesGenerationTimeSeconds = covarianceTimeElapsedSeconds;
+        executionTimes->EVDCalculationTimeSeconds = EVDTimeElapsedSeconds;
+        executionTimes->eigenvectorDisambiguationTimeSeconds = disambiguationTimeElapsedSeconds;
+    }
+
     // Cleanup
     ShapeDescriptor::free(d_referenceWeightsZ);
     ShapeDescriptor::free(d_eigenvectors);
     ShapeDescriptor::free(d_directionVotes);
+
+    // // -----------------------------------------------------------------------
+    // // End LRF timing
+    // auto endLRFTime = std::chrono::high_resolution_clock::now();
+    // std::chrono::duration<double> LRFDuration = endLRFTime - startLRFTime;
+    // double LRFTimeElapsedSeconds = LRFDuration.count();
+    // std::cout << "LRF time (internal): " << LRFTimeElapsedSeconds << "\n";
+    // // -----------------------------------------------------------------------
+
 
     return referenceFrames;
 }

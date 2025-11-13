@@ -187,6 +187,11 @@ namespace ShapeDescriptor {
     };
     struct SHOTExecutionTimes {
         double totalExecutionTimeSeconds = 0;
+        double LRFGenerationTimeSeconds = 0;
+        double covarianceMatricesGenerationTimeSeconds = 0;
+        double EVDCalculationTimeSeconds = 0;
+        double eigenvectorDisambiguationTimeSeconds = 0;
+        double descriptorCalculationTimeSeconds = 0;
     };
 
 
@@ -613,7 +618,8 @@ namespace ShapeDescriptor {
         ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSHOTReferenceFrames(
             const ShapeDescriptor::gpu::PointCloud& pointcloud,
             const ShapeDescriptor::gpu::array<OrientedPoint>& imageOrigins,
-            const ShapeDescriptor::gpu::array<float>& maxSupportRadius);
+            const ShapeDescriptor::gpu::array<float>& maxSupportRadius,
+            SHOTExecutionTimes* executionTimes);
     }
 
     namespace gpu {
