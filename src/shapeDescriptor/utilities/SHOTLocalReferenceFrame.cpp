@@ -7,7 +7,7 @@ std::vector<ShapeDescriptor::LocalReferenceFrame> ShapeDescriptor::internal::com
         const std::vector<float>& maxSupportRadius) {
     std::vector<ShapeDescriptor::LocalReferenceFrame> referenceFrames(imageOrigins.length);
     std::vector<float> referenceWeightsZ(imageOrigins.length);
-    std::vector<glm::mat3> covarianceMatrices(imageOrigins.length, glm::mat3(1.0));
+    std::vector<glm::mat3> covarianceMatrices(imageOrigins.length, glm::mat3(0.0));
     std::vector<int32_t> directionVotes(2 * imageOrigins.length);
 
     // Compute normalisation factors Z
@@ -26,6 +26,11 @@ std::vector<ShapeDescriptor::LocalReferenceFrame> ShapeDescriptor::internal::com
     for(uint32_t pointIndex = 0; pointIndex < pointCloud.pointCount; pointIndex++) {
         ShapeDescriptor::cpu::float3 point = pointCloud.vertices[pointIndex];
         for(uint32_t originIndex = 0; originIndex < imageOrigins.length; originIndex++) {
+            if (referenceWeightsZ.at(originIndex) == 0.0f) {
+                covarianceMatrices.at(originIndex) = glm::mat3(1.0f);
+                continue;
+            }
+
             ShapeDescriptor::cpu::float3 origin = imageOrigins.content[originIndex].vertex;
             ShapeDescriptor::cpu::float3 pointDelta = point - origin;
             float distance = length(pointDelta);
@@ -59,6 +64,9 @@ std::vector<ShapeDescriptor::LocalReferenceFrame> ShapeDescriptor::internal::com
         for(uint32_t originIndex = 0; originIndex < imageOrigins.length; originIndex++) {
             ShapeDescriptor::cpu::float3 origin = imageOrigins.content[originIndex].vertex;
             ShapeDescriptor::cpu::float3 pointDelta = point - origin;
+            if (length(pointDelta) > maxSupportRadius.at(originIndex)) {
+                continue;
+            }
             ShapeDescriptor::LocalReferenceFrame& frame = referenceFrames.at(originIndex);
             float dotX = dot(frame.xAxis, pointDelta);
             float dotZ = dot(frame.zAxis, pointDelta);

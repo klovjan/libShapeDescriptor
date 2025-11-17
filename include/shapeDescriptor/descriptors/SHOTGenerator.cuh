@@ -42,7 +42,6 @@ namespace internal {
             uint32_t descriptorIndex = blockIdx.x;
 
             const float3 originVertex = descriptorOrigins.content[descriptorIndex].vertex;
-            const float3 originNormal = descriptorOrigins.content[descriptorIndex].normal;
 
             // Initialize descriptor to zero
             if (threadIdx.x == 0) {
@@ -93,7 +92,6 @@ namespace internal {
                 verticalDirection = normalize(verticalDirection);
 
                 const float3 sampleNormal = normalize(pointCloud.normals.at(sampleIndex));
-                // float normalCosine = dot(sampleNormal, originNormal);
                 float normalCosine = dot(sampleNormal, localReferenceFrames.content[descriptorIndex].zAxis);
 
 
@@ -110,10 +108,8 @@ namespace internal {
                 } else {
                     cosineHistogramNeighbourBinIndex = INTERNAL_HISTOGRAM_BINS - 1;
                 }
-                float cosineHistogramBinContribution = abs(cosineHistogramDelta);
+                float cosineHistogramBinContribution = 1.0f - abs(cosineHistogramDelta);
                 float cosineHistogramNeighbourBinContribution = 1.0f - cosineHistogramBinContribution;
-                // float cosineHistogramBinContribution = 1.0f - abs(cosineHistogramDelta);
-                // float cosineHistogramNeighbourBinContribution = 1.0f - cosineHistogramBinContribution;
 
                 // b) Interpolation on azimuth
                 float azimuthAnglePosition = (internal::absoluteAngle(horizontalDirection.y, horizontalDirection.x) / (2.0f * float(M_PI))) * float(AZIMUTH_DIVISIONS);
@@ -132,10 +128,8 @@ namespace internal {
                 } else {
                     azimuthNeighbourBinIndex = AZIMUTH_DIVISIONS - 1;
                 }
-                float azimuthBinContribution = abs(azimuthHistogramDelta);
+                float azimuthBinContribution = 1.0f - abs(azimuthHistogramDelta);
                 float azimuthNeighbourBinContribution = 1.0f - azimuthBinContribution;
-                // float azimuthBinContribution = 1.0f - abs(azimuthHistogramDelta);
-                // float azimuthNeighbourBinContribution = 1.0f - azimuthBinContribution;
 
 
                 // c) Interpolation on elevation
@@ -149,10 +143,8 @@ namespace internal {
                 } else if (elevationHistogramDelta < 0) {
                     elevationNeighbourBinIndex = max(1u, elevationBinIndex) - 1;
                 }
-                float elevationBinContribution = abs(elevationHistogramDelta);
+                float elevationBinContribution = 1.0f - abs(elevationHistogramDelta);
                 float elevationNeighbourBinContribution = 1.0f - elevationBinContribution;
-                // float elevationBinContribution = 1.0f - abs(elevationHistogramDelta);
-                // float elevationNeighbourBinContribution = 1.0f - elevationBinContribution;
 
 
                 // d) Interpolation on distance
@@ -169,19 +161,13 @@ namespace internal {
                     // Should not happen
                     assert(0);
                 }
-                float radialBinContribution = abs(radialHistogramDelta);
+                float radialBinContribution = 1.0f - abs(radialHistogramDelta);
                 float radialNeighbourBinContribution = 1.0f - radialBinContribution;
-                // float radialBinContribution = 1.0f - abs(radialHistogramDelta);
-                // float radialNeighbourBinContribution = 1.0f - radialBinContribution;
-
 
                 // Increment bins
                 float primaryBinContribution = cosineHistogramBinContribution + azimuthBinContribution + elevationBinContribution + radialBinContribution;
                 incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramBinIndex, primaryBinContribution);
-
-                incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationNeighbourBinContribution, radialBinIndex, azimuthBinIndex, cosineHistogramBinIndex, elevationNeighbourBinContribution);
-                // incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationNeighbourBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramBinIndex, elevationNeighbourBinContribution);
-
+                incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationNeighbourBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramBinIndex, elevationNeighbourBinContribution);
                 incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialNeighbourBinIndex, azimuthBinIndex, cosineHistogramBinIndex, radialNeighbourBinContribution);
                 incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialBinIndex, azimuthNeighbourBinIndex, cosineHistogramBinIndex, azimuthNeighbourBinContribution);
                 incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramNeighbourBinIndex, cosineHistogramNeighbourBinContribution);
@@ -231,8 +217,10 @@ namespace internal {
         cudaError_t err = cudaDeviceSynchronize();
         if (err != cudaSuccess) {
             fprintf(stderr, "Got CUDA error: %s\n", cudaGetErrorString(err));
+            exit(EXIT_FAILURE);
         }
         std::cout << "Kernel finished -- all SHOT descriptors generated on GPU" << std::endl;
+        ShapeDescriptor::free(referenceFrames);
 
         // End Descriptor timing
         auto endDescriptorTime = std::chrono::high_resolution_clock::now();
@@ -244,6 +232,7 @@ namespace internal {
             executionTimes->LRFGenerationTimeSeconds = executionTimes->covarianceMatricesGenerationTimeSeconds
                 + executionTimes->EVDCalculationTimeSeconds + executionTimes->eigenvectorDisambiguationTimeSeconds;
 
+            // Set descriptor-calculation time
             executionTimes->descriptorCalculationTimeSeconds = descriptorTimeElapsedSeconds;
 
             // Calculate total execution time as sum of LRF and descriptor parts

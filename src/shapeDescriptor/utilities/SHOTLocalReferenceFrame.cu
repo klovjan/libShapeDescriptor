@@ -37,13 +37,11 @@ namespace internal {
         float R = maxSupportRadius.content[originIndex];
         float *cov = &covarianceMatrices.content[originIndex * 9];
 
-        // Initialize arrays to 0 / identity matrix
-        if (threadIdx.x == 0) {
+        // Initialize arrays to 0
+        if (threadIdx.x <= 8) {
             referenceWeightsZ.content[originIndex] = 0.0f;
-            // Initialize each covariance matrix to identity matrix
-            cov[0] = 1.0f; cov[1] = 0.0f; cov[2] = 0.0f;
-            cov[3] = 0.0f; cov[4] = 1.0f; cov[5] = 0.0f;
-            cov[6] = 0.0f; cov[7] = 0.0f; cov[8] = 1.0f;
+            // Initialize each covariance matrix to a zero matrix
+            cov[originIndex] = 0.0f;
         }
         __syncthreads();
 
@@ -58,10 +56,20 @@ namespace internal {
         }
         __syncthreads();
 
+        float Z = referenceWeightsZ.content[originIndex];
+        // Only proceed if there are points in the support radius
+        if (Z <= 0.0f) {
+            if (threadIdx.x == 0) {
+                // Set to identity if no points are in support, so we get a valid (but default) LRF
+                float *cov = &covarianceMatrices.content[originIndex * 9];
+                cov[0] = 1.0f; cov[4] = 1.0f; cov[8] = 1.0f;
+            }
+            return;
+        }
+
         // Compute covariance matrices
         // Suggestion: Do this per origin, then per point instead
         // That way, we can simply divide by Z at the very end instead
-        float Z = referenceWeightsZ[originIndex];
         for (uint32_t pointIndex = threadIdx.x; pointIndex < pointCount; pointIndex += blockDim.x) {
             float3 point = vertexList.at(pointIndex);
 
@@ -76,6 +84,7 @@ namespace internal {
 
             float3 covarianceDelta = {pointDelta.x, pointDelta.y, pointDelta.z};
 
+            assert(Z != 0);
             float relativeDistance = (R - distance) * (1.0f / Z);
 
             float temp[9];
@@ -133,9 +142,9 @@ namespace internal {
             float3 point = vertexList.at(pointIndex);
 
             float3 pointDelta = point - origin;
-            // if (length(pointDelta) > maxSupportRadius.content[originIndex]) {
-            //     continue;
-            // }
+            if (length(pointDelta) > maxSupportRadius.content[originIndex]) {
+                continue;
+            }
 
             ShapeDescriptor::gpu::LocalReferenceFrame &frame = referenceFrames.content[originIndex];
             float dotX = dot(frame.xAxis, pointDelta);
@@ -187,6 +196,7 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     cudaError_t err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         fprintf(stderr, "Got CUDA error: %s\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
     }
     std::cout << "Kernel finished -- covariance matrices calculated" << std::endl;
 
@@ -216,7 +226,6 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
 
 
     // -------------------- Eigenvector disambiguation -------------------
-    std::cout << "cuSOLVER finished -- eigenvectors calculated" << std::endl;
     ShapeDescriptor::gpu::array<int32_t> d_directionVotes(originCount * 2);
     ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> d_referenceFrames(originCount);
     // Start disambiguation timing
@@ -229,6 +238,7 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         fprintf(stderr, "Got CUDA error: %s\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
     }
     std::cout << "Kernel finished -- LRFs generated" << std::endl;
 
@@ -251,15 +261,6 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     ShapeDescriptor::free(d_referenceWeightsZ);
     ShapeDescriptor::free(d_eigenvectors);
     ShapeDescriptor::free(d_directionVotes);
-
-    // // -----------------------------------------------------------------------
-    // // End LRF timing
-    // auto endLRFTime = std::chrono::high_resolution_clock::now();
-    // std::chrono::duration<double> LRFDuration = endLRFTime - startLRFTime;
-    // double LRFTimeElapsedSeconds = LRFDuration.count();
-    // std::cout << "LRF time (internal): " << LRFTimeElapsedSeconds << "\n";
-    // // -----------------------------------------------------------------------
-
 
     // // -----------------------------------------------------------------------
     // // End LRF timing
