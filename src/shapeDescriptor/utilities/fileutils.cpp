@@ -5,6 +5,8 @@
 #include <array>
 #include <random>
 #include <shapeDescriptor/shapeDescriptor.h>
+#include <chrono>
+#include <iomanip>
 
 
 
@@ -119,11 +121,21 @@ std::vector<char> ShapeDescriptor::readCompressedFileUpToNBytes(const std::files
 }
 
 std::string ShapeDescriptor::generateUniqueFilenameString() {
-    time_t currentTime = std::time(nullptr);
-    tm convertedTime = *std::localtime(&currentTime);
+    // Get current time
+    auto now = std::chrono::system_clock::now();
+    // Get number of milliseconds for the current second
+    // (remainder after division into seconds)
+    auto ms = duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
+    // Convert to std::time_t in order to convert to std::tm
+    auto timer = std::chrono::system_clock::to_time_t(now);
+
+    // Convert to std::tm (in local time)
+    tm bt = *std::localtime(&timer);
+
+    // Create the output time string
     std::stringstream stream;
-    // Probably should include milliseconds too
-    stream << std::put_time(&convertedTime, "%Y%m%d-%H%M%S");
+    stream << std::put_time(&bt, "%Y%m%d-%H%M%S");
+    stream << '.' << std::setfill('0') << std::setw(3) << ms.count();
     return stream.str();
 }

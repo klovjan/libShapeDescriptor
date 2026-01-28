@@ -1,3 +1,4 @@
+// V2: SHARED MEMORY (TODO)
 #pragma once
 
 #include <shapeDescriptor/shapeDescriptor.h>
@@ -12,6 +13,7 @@
 
 namespace ShapeDescriptor {
 namespace internal {
+namespace v2 {
         template<uint32_t ELEVATION_DIVISIONS = 2, uint32_t RADIAL_DIVISIONS = 2, uint32_t AZIMUTH_DIVISIONS = 8, uint32_t INTERNAL_HISTOGRAM_BINS = 11>
         __device__
         inline void incrementSHOTBinDevice(ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>& descriptor,
@@ -133,7 +135,7 @@ namespace internal {
 
 
                 // c) Interpolation on elevation
-                float elevationAngleRaw = std::atan2(verticalDirection.y, verticalDirection.x);
+                float elevationAngleRaw = atan2f(verticalDirection.y, verticalDirection.x);
                 float elevationAnglePosition = clamp(((elevationAngleRaw / (2.0f * float(M_PI))) + 0.5f) * float(ELEVATION_DIVISIONS), 0.0f, float(ELEVATION_DIVISIONS));
                 uint32_t elevationBinIndex = min(ELEVATION_DIVISIONS - 1, uint32_t(elevationAnglePosition));
                 float elevationHistogramDelta = elevationAnglePosition - (float(elevationBinIndex) + 0.5f);
@@ -181,7 +183,7 @@ namespace internal {
                 double squaredSum = 0;
                 for (int i = 0; i < binCount; i++) {
                     double total = descriptors.content[descriptorIndex].contents[i];
-                    if (std::isnan(total)) {
+                    if (isnan(total)) {
                         descriptors.content[descriptorIndex].contents[i] = 0;
                         total = 0;
                     }
@@ -196,7 +198,9 @@ namespace internal {
             }
         }
 }
+}
 
+namespace v2 {
     template<uint32_t ELEVATION_DIVISIONS = 2, uint32_t RADIAL_DIVISIONS = 2, uint32_t AZIMUTH_DIVISIONS = 8, uint32_t INTERNAL_HISTOGRAM_BINS = 11>
     gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> generateSHOTDescriptorsMultiRadius(
             gpu::PointCloud pointCloud,
@@ -206,12 +210,12 @@ namespace internal {
         gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> descriptors(descriptorOrigins.length);
 
         // Compute LRFs
-        gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames = ShapeDescriptor::internal::computeSHOTReferenceFrames(pointCloud, descriptorOrigins, supportRadii, executionTimes);
+        gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames = ShapeDescriptor::internal::v2::computeSHOTReferenceFrames(pointCloud, descriptorOrigins, supportRadii, executionTimes);
 
         // Start descriptor timing
         auto startDescriptorTime = std::chrono::high_resolution_clock::now();
         // Compute SHOT descriptors
-        internal::computeGeneralisedSHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<descriptorOrigins.length, 416>>>(descriptorOrigins, pointCloud, descriptors, referenceFrames, supportRadii);
+        internal::v2::computeGeneralisedSHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<descriptorOrigins.length, 416>>>(descriptorOrigins, pointCloud, descriptors, referenceFrames, supportRadii);
 
         // Synchronize and check if any errors occurred
         cudaError_t err = cudaDeviceSynchronize();
@@ -253,4 +257,5 @@ namespace internal {
 
         return generateSHOTDescriptorsMultiRadius<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>(pointCloud, descriptorOrigins, radii, executionTimes);
     }
+}
 }

@@ -610,21 +610,40 @@ namespace ShapeDescriptor {
 
         std::array<ShapeDescriptor::cpu::float3, 3> computeEigenVectors(std::array<ShapeDescriptor::cpu::float3, 3> columnMajorMatrix);
 
+        // CPU version
         std::vector<ShapeDescriptor::LocalReferenceFrame> computeSHOTReferenceFrames(
                 const ShapeDescriptor::cpu::PointCloud& pointCloud,
                 const ShapeDescriptor::cpu::array<ShapeDescriptor::OrientedPoint>& imageOrigins,
                 const std::vector<float>& maxSupportRadius);
 
-        ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSHOTReferenceFrames(
-            const ShapeDescriptor::gpu::PointCloud& pointcloud,
-            const ShapeDescriptor::gpu::array<OrientedPoint>& imageOrigins,
-            const ShapeDescriptor::gpu::array<float>& maxSupportRadius,
-            SHOTExecutionTimes* executionTimes);
+        // GPU versions
+        namespace v1 {
+            ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSHOTReferenceFrames(
+                const ShapeDescriptor::gpu::PointCloud& pointcloud,
+                const ShapeDescriptor::gpu::array<OrientedPoint>& imageOrigins,
+                const ShapeDescriptor::gpu::array<float>& maxSupportRadius,
+                SHOTExecutionTimes* executionTimes);
+        }
+
+        namespace v2 {
+            ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSHOTReferenceFrames(
+                const ShapeDescriptor::gpu::PointCloud& pointcloud,
+                const ShapeDescriptor::gpu::array<OrientedPoint>& imageOrigins,
+                const ShapeDescriptor::gpu::array<float>& maxSupportRadius,
+                SHOTExecutionTimes* executionTimes);
+        }
     }
 
     namespace gpu {
+    namespace v1{
         ShapeDescriptor::gpu::array<float> computeEigenVectorsMultiple(ShapeDescriptor::gpu::array<float> d_columnMajorMatrices,
                                          uint32_t nMatrices);
+    }
+
+    namespace v2 {
+        ShapeDescriptor::gpu::array<float> computeEigenVectorsMultiple(ShapeDescriptor::gpu::array<float> d_columnMajorMatrices,
+                                         uint32_t nMatrices);
+    }
     }
 
     cpu::PointCloud sampleMesh(cpu::Mesh mesh, size_t sampleCount, size_t randomSamplingSeed);

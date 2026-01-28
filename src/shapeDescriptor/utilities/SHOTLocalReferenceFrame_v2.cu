@@ -1,3 +1,4 @@
+// V2: SHARED MEMORY (TODO)
 #include <shapeDescriptor/shapeDescriptor.h>
 
 #ifdef DESCRIPTOR_CUDA_KERNELS_ENABLED
@@ -6,17 +7,18 @@
 #include <cuda_runtime.h>
 #endif
 
-// Helper for column-major outer product
-// a is a column vector, b is a row vector
-__device__ void outerProduct(const float3& a, const float3& b, float* M) {
-    M[0] = a.x * b.x; M[3] = a.x * b.y; M[6] = a.x * b.z;
-    M[1] = a.y * b.x; M[4] = a.y * b.y; M[7] = a.y * b.z;
-    M[2] = a.z * b.x; M[5] = a.z * b.y; M[8] = a.z * b.z;
-}
-
-
 namespace ShapeDescriptor {
 namespace internal {
+namespace v2 {
+    // Helper for column-major outer product
+    // a is a column vector, b is a row vector
+    __device__ void outerProduct(const float3& a, const float3& b, float* M) {
+        M[0] = a.x * b.x; M[3] = a.x * b.y; M[6] = a.x * b.z;
+        M[1] = a.y * b.x; M[4] = a.y * b.y; M[7] = a.y * b.z;
+        M[2] = a.z * b.x; M[5] = a.z * b.y; M[8] = a.z * b.z;
+    }
+
+
     // WARNING: Function causes somewhat significant divergence in results from CPU (worst case ~3 %)
     // Possible cause: floating point addition order
     __global__ void calculateCovarianceMatrices(
@@ -213,7 +215,7 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     auto startEVDTime = std::chrono::high_resolution_clock::now();
 
     // Compute initial eigenvectors for all keypoints (origins)
-    ShapeDescriptor::gpu::array<float> d_eigenvectors = ShapeDescriptor::gpu::computeEigenVectorsMultiple(d_covarianceMatrices, originCount);
+    ShapeDescriptor::gpu::array<float> d_eigenvectors = ShapeDescriptor::gpu::v2::computeEigenVectorsMultiple(d_covarianceMatrices, originCount);
 
     // End EVD timing
     auto endEVDTime = std::chrono::high_resolution_clock::now();
@@ -272,6 +274,7 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
 
 
     return d_referenceFrames;
+}
 }
 }
 }
