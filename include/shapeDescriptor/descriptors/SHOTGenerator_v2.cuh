@@ -12,8 +12,8 @@
 #endif
 
 namespace ShapeDescriptor {
-namespace internal {
 namespace v2 {
+namespace {
         template<uint32_t ELEVATION_DIVISIONS = 2, uint32_t RADIAL_DIVISIONS = 2, uint32_t AZIMUTH_DIVISIONS = 8, uint32_t INTERNAL_HISTOGRAM_BINS = 11>
         __device__
         inline void incrementSHOTBinDevice(ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>& descriptor,
@@ -41,16 +41,15 @@ namespace v2 {
                 const ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> localReferenceFrames,
                 const ShapeDescriptor::gpu::array<float> supportRadii)
         {
-            uint32_t descriptorIndex = blockIdx.x;
+            const uint32_t descriptorIndex = blockIdx.x;
 
             const float3 originVertex = descriptorOrigins.content[descriptorIndex].vertex;
 
-            // Initialize descriptor to zero
-            if (threadIdx.x == 0) {
-                auto &descriptor = descriptors.content[descriptorIndex];
-                for (uint32_t binIndex = 0; binIndex < descriptor.totalBinCount; binIndex++) {
-                    descriptor.contents[binIndex] = 0;
-                }
+            // Set up shared memory for this block's descriptor
+            __shared__ ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS> localDescriptor;
+            const uint32_t binCount = localDescriptor.totalBinCount;
+            for (uint32_t binIndex = threadIdx.x; binIndex < binCount; binIndex += blockDim.x) {
+                localDescriptor.contents[binIndex] = 0;
             }
             __syncthreads();
 
@@ -69,6 +68,7 @@ namespace v2 {
                 }
 
                 // Transforming descriptor coordinate system to the origin
+                // TODO: Fytt ut av for-loop
                 const float3 relativeSamplePoint = {
                     dot(localReferenceFrames.content[descriptorIndex].xAxis, translated),
                     dot(localReferenceFrames.content[descriptorIndex].yAxis, translated),
@@ -114,7 +114,7 @@ namespace v2 {
                 float cosineHistogramNeighbourBinContribution = 1.0f - cosineHistogramBinContribution;
 
                 // b) Interpolation on azimuth
-                float azimuthAnglePosition = (internal::absoluteAngle(horizontalDirection.y, horizontalDirection.x) / (2.0f * float(M_PI))) * float(AZIMUTH_DIVISIONS);
+                float azimuthAnglePosition = (::ShapeDescriptor::internal::absoluteAngle(horizontalDirection.y, horizontalDirection.x) / (2.0f * float(M_PI))) * float(AZIMUTH_DIVISIONS);
                 if (azimuthAnglePosition < 0) {
                     azimuthAnglePosition += float(AZIMUTH_DIVISIONS);
                 } else if (azimuthAnglePosition >= float(AZIMUTH_DIVISIONS)) {
@@ -168,54 +168,61 @@ namespace v2 {
 
                 // Increment bins
                 float primaryBinContribution = cosineHistogramBinContribution + azimuthBinContribution + elevationBinContribution + radialBinContribution;
-                incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramBinIndex, primaryBinContribution);
-                incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationNeighbourBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramBinIndex, elevationNeighbourBinContribution);
-                incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialNeighbourBinIndex, azimuthBinIndex, cosineHistogramBinIndex, radialNeighbourBinContribution);
-                incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialBinIndex, azimuthNeighbourBinIndex, cosineHistogramBinIndex, azimuthNeighbourBinContribution);
-                incrementSHOTBinDevice(descriptors.content[descriptorIndex], elevationBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramNeighbourBinIndex, cosineHistogramNeighbourBinContribution);
+                incrementSHOTBinDevice(localDescriptor, elevationBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramBinIndex, primaryBinContribution);
+                incrementSHOTBinDevice(localDescriptor, elevationNeighbourBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramBinIndex, elevationNeighbourBinContribution);
+                incrementSHOTBinDevice(localDescriptor, elevationBinIndex, radialNeighbourBinIndex, azimuthBinIndex, cosineHistogramBinIndex, radialNeighbourBinContribution);
+                incrementSHOTBinDevice(localDescriptor, elevationBinIndex, radialBinIndex, azimuthNeighbourBinIndex, cosineHistogramBinIndex, azimuthNeighbourBinContribution);
+                incrementSHOTBinDevice(localDescriptor, elevationBinIndex, radialBinIndex, azimuthBinIndex, cosineHistogramNeighbourBinIndex, cosineHistogramNeighbourBinContribution);
             }
             __syncthreads();
 
             // Normalise descriptor
             // NOTE: Done on only one thread per block, i.e. one thread per origin (for now?)
+            // TODO: WarpAllReduceSum() (one warp normalises the entire descriptor)
             if (threadIdx.x == 0) {
-                uint32_t binCount = ELEVATION_DIVISIONS * RADIAL_DIVISIONS * AZIMUTH_DIVISIONS * INTERNAL_HISTOGRAM_BINS;
                 double squaredSum = 0;
-                for (int i = 0; i < binCount; i++) {
-                    double total = descriptors.content[descriptorIndex].contents[i];
+                for (int binIndex = 0; binIndex < binCount; binIndex++) {
+                    double total = localDescriptor.contents[binIndex];
                     if (isnan(total)) {
-                        descriptors.content[descriptorIndex].contents[i] = 0;
+                        localDescriptor.contents[binIndex] = 0;
                         total = 0;
                     }
                     squaredSum += total * total;
                 }
                 if (squaredSum > 0) {
                     double totalLength = sqrt(squaredSum);
-                    for (int i = 0; i < binCount; i++) {
-                        descriptors.content[descriptorIndex].contents[i] /= totalLength;
+                    for (int binIndex = 0; binIndex < binCount; binIndex++) {
+                        localDescriptor.contents[binIndex] /= totalLength;
                     }
                 }
             }
+            __syncthreads();
+
+            // Insert local (shared memory) descriptor into global descriptor array
+            auto &globalDescriptor = descriptors.content[descriptorIndex];
+            for (uint32_t binIndex = threadIdx.x; binIndex < binCount; binIndex += blockDim.x) {
+                globalDescriptor.contents[binIndex] = localDescriptor.contents[binIndex];
+            }
         }
 }
-}
 
-namespace v2 {
     template<uint32_t ELEVATION_DIVISIONS = 2, uint32_t RADIAL_DIVISIONS = 2, uint32_t AZIMUTH_DIVISIONS = 8, uint32_t INTERNAL_HISTOGRAM_BINS = 11>
-    gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> generateSHOTDescriptorsMultiRadius(
+    ShapeDescriptor::gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> generateSHOTDescriptorsMultiRadius(
             gpu::PointCloud pointCloud,
             gpu::array<OrientedPoint> descriptorOrigins,
             gpu::array<float> supportRadii,
             SHOTExecutionTimes* executionTimes = nullptr) {
-        gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> descriptors(descriptorOrigins.length);
+        uint32_t originCount = descriptorOrigins.length;
+
+        gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> descriptors(originCount);
 
         // Compute LRFs
-        gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames = ShapeDescriptor::internal::v2::computeSHOTReferenceFrames(pointCloud, descriptorOrigins, supportRadii, executionTimes);
+        gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames = ShapeDescriptor::v2::computeSHOTReferenceFrames(pointCloud, descriptorOrigins, supportRadii, executionTimes);
 
         // Start descriptor timing
         auto startDescriptorTime = std::chrono::high_resolution_clock::now();
         // Compute SHOT descriptors
-        internal::v2::computeGeneralisedSHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<descriptorOrigins.length, 416>>>(descriptorOrigins, pointCloud, descriptors, referenceFrames, supportRadii);
+        computeGeneralisedSHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<originCount, 416>>>(descriptorOrigins, pointCloud, descriptors, referenceFrames, supportRadii);
 
         // Synchronize and check if any errors occurred
         cudaError_t err = cudaDeviceSynchronize();

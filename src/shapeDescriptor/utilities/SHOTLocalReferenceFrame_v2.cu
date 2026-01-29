@@ -8,7 +8,6 @@
 #endif
 
 namespace ShapeDescriptor {
-namespace internal {
 namespace v2 {
     // Helper for column-major outer product
     // a is a column vector, b is a row vector
@@ -215,7 +214,7 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     auto startEVDTime = std::chrono::high_resolution_clock::now();
 
     // Compute initial eigenvectors for all keypoints (origins)
-    ShapeDescriptor::gpu::array<float> d_eigenvectors = ShapeDescriptor::gpu::v2::computeEigenVectorsMultiple(d_covarianceMatrices, originCount);
+    ShapeDescriptor::gpu::array<float> d_eigenvectors = ShapeDescriptor::v2::computeEigenVectorsMultiple(d_covarianceMatrices, originCount);
 
     // End EVD timing
     auto endEVDTime = std::chrono::high_resolution_clock::now();
@@ -274,7 +273,6 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
 
 
     return d_referenceFrames;
-}
 }
 }
 }

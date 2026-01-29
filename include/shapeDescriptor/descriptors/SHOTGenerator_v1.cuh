@@ -12,8 +12,8 @@
 #endif
 
 namespace ShapeDescriptor {
-namespace internal {
 namespace v1 {
+namespace {
         template<uint32_t ELEVATION_DIVISIONS = 2, uint32_t RADIAL_DIVISIONS = 2, uint32_t AZIMUTH_DIVISIONS = 8, uint32_t INTERNAL_HISTOGRAM_BINS = 11>
         __device__
         inline void incrementSHOTBinDevice(ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>& descriptor,
@@ -114,7 +114,7 @@ namespace v1 {
                 float cosineHistogramNeighbourBinContribution = 1.0f - cosineHistogramBinContribution;
 
                 // b) Interpolation on azimuth
-                float azimuthAnglePosition = (internal::absoluteAngle(horizontalDirection.y, horizontalDirection.x) / (2.0f * float(M_PI))) * float(AZIMUTH_DIVISIONS);
+                float azimuthAnglePosition = (ShapeDescriptor::internal::absoluteAngle(horizontalDirection.y, horizontalDirection.x) / (2.0f * float(M_PI))) * float(AZIMUTH_DIVISIONS);
                 if (azimuthAnglePosition < 0) {
                     azimuthAnglePosition += float(AZIMUTH_DIVISIONS);
                 } else if (azimuthAnglePosition >= float(AZIMUTH_DIVISIONS)) {
@@ -198,11 +198,9 @@ namespace v1 {
             }
         }
 }
-}
 
-namespace v1 {
     template<uint32_t ELEVATION_DIVISIONS = 2, uint32_t RADIAL_DIVISIONS = 2, uint32_t AZIMUTH_DIVISIONS = 8, uint32_t INTERNAL_HISTOGRAM_BINS = 11>
-    gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> generateSHOTDescriptorsMultiRadius(
+    ::ShapeDescriptor::gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> generateSHOTDescriptorsMultiRadius(
             gpu::PointCloud pointCloud,
             gpu::array<OrientedPoint> descriptorOrigins,
             gpu::array<float> supportRadii,
@@ -210,12 +208,12 @@ namespace v1 {
         gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> descriptors(descriptorOrigins.length);
 
         // Compute LRFs
-        gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames = ShapeDescriptor::internal::v1::computeSHOTReferenceFrames(pointCloud, descriptorOrigins, supportRadii, executionTimes);
+        gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames = ShapeDescriptor::v1::computeSHOTReferenceFrames(pointCloud, descriptorOrigins, supportRadii, executionTimes);
 
         // Start descriptor timing
         auto startDescriptorTime = std::chrono::high_resolution_clock::now();
         // Compute SHOT descriptors
-        internal::v1::computeGeneralisedSHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<descriptorOrigins.length, 416>>>(descriptorOrigins, pointCloud, descriptors, referenceFrames, supportRadii);
+        computeGeneralisedSHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<descriptorOrigins.length, 416>>>(descriptorOrigins, pointCloud, descriptors, referenceFrames, supportRadii);
 
         // Synchronize and check if any errors occurred
         cudaError_t err = cudaDeviceSynchronize();

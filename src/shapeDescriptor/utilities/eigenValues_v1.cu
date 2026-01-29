@@ -9,7 +9,6 @@
 #endif
 
 namespace ShapeDescriptor {
-namespace gpu {
 namespace v1 {
 void checkCuSolverStatus(cusolverStatus_t status) {
     if (status != CUSOLVER_STATUS_SUCCESS) {
@@ -129,7 +128,6 @@ ShapeDescriptor::gpu::array<float> computeEigenVectorsMultiple(ShapeDescriptor::
 
     // 4. Create output gpu::array
     return d_columnMajorMatrices;
-}
 }
 }
 }
