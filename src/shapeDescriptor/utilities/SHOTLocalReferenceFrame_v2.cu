@@ -17,32 +17,32 @@ namespace v2 {
         M[2] = a.z * b.x; M[5] = a.z * b.y; M[8] = a.z * b.z;
     }
 
-
     // WARNING: Function causes somewhat significant divergence in results from CPU (worst case ~3 %)
     // Possible cause: floating point addition order
     __global__ void calculateCovarianceMatrices(
         const ShapeDescriptor::gpu::PointCloud pointcloud,
         const ShapeDescriptor::gpu::array<OrientedPoint> imageOrigins,
         const ShapeDescriptor::gpu::array<float> maxSupportRadius,
-        ShapeDescriptor::gpu::array<float> referenceWeightsZ,  // length originCount
         ShapeDescriptor::gpu::array<float> covarianceMatrices  // length originCount * 9, column-major 3x3 per origin
     )
     {
-        uint32_t pointCount = pointcloud.pointCount;
+        const uint32_t pointCount = pointcloud.pointCount;
 
         const ShapeDescriptor::gpu::VertexList &vertexList = pointcloud.vertices;
 
         // Hand out a descriptor origin to each block
-        uint32_t originIndex = blockIdx.x;
-        float3 origin = imageOrigins.content[originIndex].vertex;
+        const uint32_t originIndex = blockIdx.x;
+        const float3 origin = imageOrigins.content[originIndex].vertex;
         float R = maxSupportRadius.content[originIndex];
-        float *cov = &covarianceMatrices.content[originIndex * 9];
+        float *globalCovarianceMatrix = &covarianceMatrices.content[originIndex * 9];
 
+        __shared__ float localReferenceWeightZ;
+        __shared__ float localCovarianceMatrix[9];
         // Initialize arrays to 0
         if (threadIdx.x <= 8) {
-            referenceWeightsZ.content[originIndex] = 0.0f;
-            // Initialize each covariance matrix to a zero matrix
-            cov[originIndex] = 0.0f;
+            localReferenceWeightZ = 0.0f;
+            // Initialize the covariance matrix to a zero matrix
+            localCovarianceMatrix[threadIdx.x] = 0.0f;
         }
         __syncthreads();
 
@@ -52,25 +52,23 @@ namespace v2 {
 
             float distance = length(point - origin);
             if (distance <= R) {
-                atomicAdd_block(&referenceWeightsZ.content[originIndex], R - distance);
+                atomicAdd_block(&localReferenceWeightZ, R - distance);
             }
         }
         __syncthreads();
 
-        float Z = referenceWeightsZ.content[originIndex];
         // Only proceed if there are points in the support radius
-        if (Z <= 0.0f) {
+        if (localReferenceWeightZ <= 0.0f) {
             if (threadIdx.x == 0) {
                 // Set to identity if no points are in support, so we get a valid (but default) LRF
-                float *cov = &covarianceMatrices.content[originIndex * 9];
-                cov[0] = 1.0f; cov[4] = 1.0f; cov[8] = 1.0f;
+                localCovarianceMatrix[0] = 1.0f; localCovarianceMatrix[4] = 1.0f; localCovarianceMatrix[8] = 1.0f;
             }
             return;
         }
 
         // Compute covariance matrices
         // Suggestion: Do this per origin, then per point instead
-        // That way, we can simply divide by Z at the very end instead
+        // That way, we can simply divide by localReferenceWeightZ at the very end instead
         for (uint32_t pointIndex = threadIdx.x; pointIndex < pointCount; pointIndex += blockDim.x) {
             float3 point = vertexList.at(pointIndex);
 
@@ -85,16 +83,22 @@ namespace v2 {
 
             float3 covarianceDelta = {pointDelta.x, pointDelta.y, pointDelta.z};
 
-            assert(Z != 0);
-            float relativeDistance = (R - distance) * (1.0f / Z);
+            assert(localReferenceWeightZ != 0);
+            float relativeDistance = (R - distance) * (1.0f / localReferenceWeightZ);
 
             float temp[9];
             outerProduct(covarianceDelta, covarianceDelta, temp);
 
             for (int i = 0; i < 9; ++i) {
                 // Fill the covariance matrices
-                atomicAdd_block(&cov[i], relativeDistance * temp[i]);
+                atomicAdd_block(&localCovarianceMatrix[i], relativeDistance * temp[i]);
             }
+        }
+        __syncthreads();
+
+        // Write shared memory covariance matrices to global memory
+        if (threadIdx.x <= 8) {
+            globalCovarianceMatrix[threadIdx.x] = localCovarianceMatrix[threadIdx.x];
         }
     }
 
@@ -179,7 +183,7 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     // auto startLRFTime = std::chrono::high_resolution_clock::now();
     // // -----------------------------------------------------------------------
 
-    uint32_t originCount = imageOrigins.length;
+    const uint32_t originCount = imageOrigins.length;
 
 
     // ----------------------- Covariance matrices ----------------------- 
@@ -187,11 +191,10 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     auto startCovarianceTime = std::chrono::high_resolution_clock::now();
 
     // Allocate GPU memory for temporary matrices
-    ShapeDescriptor::gpu::array<float> d_referenceWeightsZ(originCount);
     ShapeDescriptor::gpu::array<float> d_covarianceMatrices(originCount * 9);
 
     // Calculate SHOT's "covariance matrices"
-    calculateCovarianceMatrices<<<originCount, 416>>>(pointcloud, imageOrigins, maxSupportRadius, d_referenceWeightsZ, d_covarianceMatrices);
+    calculateCovarianceMatrices<<<originCount, 416>>>(pointcloud, imageOrigins, maxSupportRadius, d_covarianceMatrices);
 
     // Synchronize and check if any errors occurred
     cudaError_t err = cudaDeviceSynchronize();
@@ -259,7 +262,6 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     }
 
     // Cleanup
-    ShapeDescriptor::free(d_referenceWeightsZ);
     ShapeDescriptor::free(d_eigenvectors);
     ShapeDescriptor::free(d_directionVotes);
 
