@@ -177,28 +177,30 @@ namespace {
             __syncthreads();
 
             // Normalise descriptor
-            // NOTE: Done on only one thread per block, i.e. one thread per origin (for now?)
-            // TODO: WarpAllReduceSum() (one warp normalises the entire descriptor)
-            if (threadIdx.x == 0) {
-                float squaredSum = 0;
-                for (uint32_t binIndex = 0; binIndex < binCount; binIndex++) {
+            if (threadIdx.x <= 31) {
+                // Compute squared sum in parallel using warp reduction
+                float threadSquaredSum = 0;
+                for (uint32_t binIndex = threadIdx.x; binIndex < binCount; binIndex += 32) {
                     float total = localDescriptor.contents[binIndex];
                     if (isnan(total)) {
                         localDescriptor.contents[binIndex] = 0;
                         total = 0;
                     }
-                    squaredSum += total * total;
+                    threadSquaredSum += total * total;
                 }
+                float squaredSum = ShapeDescriptor::warpAllReduceSum(threadSquaredSum);
+
+                // Normalize descriptor in parallel
                 if (squaredSum > 0) {
                     float totalLength = sqrt(squaredSum);
-                    for (uint32_t binIndex = 0; binIndex < binCount; binIndex++) {
+                    for (uint32_t binIndex = threadIdx.x; binIndex < binCount; binIndex += 32) {
                         localDescriptor.contents[binIndex] /= totalLength;
                     }
                 }
             }
             __syncthreads();
 
-            // Insert local (shared memory) descriptor into global descriptor array
+            // Copy shared memory descriptor into global memory
             auto &globalDescriptor = descriptors.content[descriptorIndex];
             for (uint32_t binIndex = threadIdx.x; binIndex < binCount; binIndex += blockDim.x) {
                 globalDescriptor.contents[binIndex] = localDescriptor.contents[binIndex];
