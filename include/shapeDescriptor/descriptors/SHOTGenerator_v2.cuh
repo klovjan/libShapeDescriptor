@@ -53,6 +53,8 @@ namespace {
             }
             __syncthreads();
 
+            float currentSupportRadius = supportRadii.content[descriptorIndex];
+            const ShapeDescriptor::gpu::LocalReferenceFrame LRF = localReferenceFrames.content[descriptorIndex];
             for (unsigned int sampleIndex = threadIdx.x; sampleIndex < pointCloud.pointCount; sampleIndex += blockDim.x) {
                 // 0. Fetch sample vertex
                 const float3 samplePoint = pointCloud.vertices.at(sampleIndex);
@@ -62,17 +64,15 @@ namespace {
 
                 // Only include vertices which are within the support radius
                 float distanceToVertex = length(translated);
-                float currentSupportRadius = supportRadii.content[descriptorIndex];
                 if (distanceToVertex > currentSupportRadius) {
                     continue;
                 }
 
                 // Transforming descriptor coordinate system to the origin
-                // TODO: Fytt ut av for-loop
                 const float3 relativeSamplePoint = {
-                    dot(localReferenceFrames.content[descriptorIndex].xAxis, translated),
-                    dot(localReferenceFrames.content[descriptorIndex].yAxis, translated),
-                    dot(localReferenceFrames.content[descriptorIndex].zAxis, translated)
+                    dot(LRF.xAxis, translated),
+                    dot(LRF.yAxis, translated),
+                    dot(LRF.zAxis, translated)
                 };
 
                 float2 horizontalDirection = {relativeSamplePoint.x, relativeSamplePoint.y};
@@ -94,7 +94,7 @@ namespace {
                 verticalDirection = normalize(verticalDirection);
 
                 const float3 sampleNormal = normalize(pointCloud.normals.at(sampleIndex));
-                float normalCosine = dot(sampleNormal, localReferenceFrames.content[descriptorIndex].zAxis);
+                float normalCosine = dot(sampleNormal, LRF.zAxis);
 
 
                 // For the interpolations we'll use the order used in the paper
@@ -180,9 +180,9 @@ namespace {
             // NOTE: Done on only one thread per block, i.e. one thread per origin (for now?)
             // TODO: WarpAllReduceSum() (one warp normalises the entire descriptor)
             if (threadIdx.x == 0) {
-                double squaredSum = 0;
-                for (int binIndex = 0; binIndex < binCount; binIndex++) {
-                    double total = localDescriptor.contents[binIndex];
+                float squaredSum = 0;
+                for (uint32_t binIndex = 0; binIndex < binCount; binIndex++) {
+                    float total = localDescriptor.contents[binIndex];
                     if (isnan(total)) {
                         localDescriptor.contents[binIndex] = 0;
                         total = 0;
@@ -190,8 +190,8 @@ namespace {
                     squaredSum += total * total;
                 }
                 if (squaredSum > 0) {
-                    double totalLength = sqrt(squaredSum);
-                    for (int binIndex = 0; binIndex < binCount; binIndex++) {
+                    float totalLength = sqrt(squaredSum);
+                    for (uint32_t binIndex = 0; binIndex < binCount; binIndex++) {
                         localDescriptor.contents[binIndex] /= totalLength;
                     }
                 }
