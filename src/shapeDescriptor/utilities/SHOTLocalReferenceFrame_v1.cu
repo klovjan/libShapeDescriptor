@@ -192,7 +192,7 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
     ShapeDescriptor::gpu::array<float> d_covarianceMatrices(originCount * 9);
 
     // Calculate SHOT's "covariance matrices"
-    calculateCovarianceMatrices<<<originCount, 416>>>(pointcloud, imageOrigins, maxSupportRadius, d_referenceWeightsZ, d_covarianceMatrices);
+    calculateCovarianceMatrices<<<originCount, 512>>>(pointcloud, imageOrigins, maxSupportRadius, d_referenceWeightsZ, d_covarianceMatrices);
 
     // Synchronize and check if any errors occurred
     cudaError_t err = cudaDeviceSynchronize();
