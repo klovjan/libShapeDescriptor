@@ -38,7 +38,7 @@ namespace {
                 const ShapeDescriptor::gpu::array<ShapeDescriptor::OrientedPoint> descriptorOrigins,
                 const ShapeDescriptor::gpu::PointCloud pointCloud,
                 const ShapeDescriptor::gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> descriptors,
-                const ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> localReferenceFrames,
+                const ShapeDescriptor::gpu::v3::LocalReferenceFrames localReferenceFrames,
                 const ShapeDescriptor::gpu::array<float> supportRadii)
         {
             const uint32_t descriptorIndex = blockIdx.x;
@@ -52,11 +52,17 @@ namespace {
                 localDescriptor.contents[binIndex] = 0;
             }
 
-            __shared__ ShapeDescriptor::gpu::LocalReferenceFrame localLRF;
+            // __shared__ ShapeDescriptor::gpu::LocalReferenceFrame localLRF;
+            __shared__ float3 localLRFXAxis;
+            __shared__ float3 localLRFYAxis;
+            __shared__ float3 localLRFZAxis;
             if (threadIdx.x == 0) {
-                localLRF.xAxis = localReferenceFrames.content[descriptorIndex].xAxis;
-                localLRF.yAxis = localReferenceFrames.content[descriptorIndex].yAxis;
-                localLRF.zAxis = localReferenceFrames.content[descriptorIndex].zAxis;
+                // localLRF.xAxis = localReferenceFrames.xAxisAt(descriptorIndex);
+                // localLRF.yAxis = localReferenceFrames.yAxisAt(descriptorIndex);
+                // localLRF.zAxis = localReferenceFrames.zAxisAt(descriptorIndex);
+                localLRFXAxis = localReferenceFrames.xAxisAt(descriptorIndex);
+                localLRFYAxis = localReferenceFrames.yAxisAt(descriptorIndex);
+                localLRFZAxis = localReferenceFrames.zAxisAt(descriptorIndex);
             }
             __syncthreads();
 
@@ -77,9 +83,9 @@ namespace {
                 // Transforming descriptor coordinate system to the origin
                 // TODO: Fytt ut av for-loop
                 const float3 relativeSamplePoint = {
-                    dot(localLRF.xAxis, translated),
-                    dot(localLRF.yAxis, translated),
-                    dot(localLRF.zAxis, translated)
+                    dot(localLRFXAxis, translated),
+                    dot(localLRFYAxis, translated),
+                    dot(localLRFZAxis, translated)
                 };
 
                 float2 horizontalDirection = {relativeSamplePoint.x, relativeSamplePoint.y};
@@ -101,7 +107,7 @@ namespace {
                 verticalDirection = normalize(verticalDirection);
 
                 const float3 sampleNormal = normalize(pointCloud.normals.at(sampleIndex));
-                float normalCosine = dot(sampleNormal, localLRF.zAxis);
+                float normalCosine = dot(sampleNormal, localLRFZAxis);
 
                 // For the interpolations we'll use the order used in the paper
                 // a) Interpolation on normal cosines
@@ -223,7 +229,7 @@ namespace {
         gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> descriptors(originCount);
 
         // Compute LRFs
-        gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames = ShapeDescriptor::v3::computeSHOTReferenceFrames(pointCloud, descriptorOrigins, supportRadii, executionTimes);
+        gpu::v3::LocalReferenceFrames referenceFrames = ShapeDescriptor::v3::computeSHOTReferenceFrames(pointCloud, descriptorOrigins, supportRadii, executionTimes);
 
         // Start descriptor timing
         auto startDescriptorTime = std::chrono::high_resolution_clock::now();
@@ -237,7 +243,7 @@ namespace {
             exit(EXIT_FAILURE);
         }
         std::cout << "Kernel finished -- all SHOT descriptors generated on GPU" << std::endl;
-        ShapeDescriptor::free(referenceFrames);
+        referenceFrames.free();
 
         // End Descriptor timing
         auto endDescriptorTime = std::chrono::high_resolution_clock::now();

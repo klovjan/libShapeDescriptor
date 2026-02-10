@@ -107,7 +107,7 @@ namespace v3 {
         const ShapeDescriptor::gpu::array<float> maxSupportRadius,
         ShapeDescriptor::gpu::array<float> eigenvectors,
         ShapeDescriptor::gpu::array<int32_t> directionVotes,   // length originCount * 2
-        ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> referenceFrames)
+        ShapeDescriptor::gpu::v3::LocalReferenceFrames referenceFrames)
     {
         uint32_t pointCount = pointcloud.pointCount;
 
@@ -120,20 +120,20 @@ namespace v3 {
         if (threadIdx.x == 0) {
             // Initialise referenceFrames to eigenVectors' current values
             // NOTE: Probably wildly inefficient
-            referenceFrames.content[originIndex].xAxis = float3(
+            referenceFrames.setXAxisAt(originIndex, float3(
                 eigenvectors[originIndex*9 + 0],
                 eigenvectors[originIndex*9 + 1],
-                eigenvectors[originIndex*9 + 2]);
+                eigenvectors[originIndex*9 + 2]));
 
-            referenceFrames.content[originIndex].yAxis = float3(
+            referenceFrames.setYAxisAt(originIndex, float3(
                 eigenvectors[originIndex*9 + 3],
                 eigenvectors[originIndex*9 + 4],
-                eigenvectors[originIndex*9 + 5]);
+                eigenvectors[originIndex*9 + 5]));
             
-            referenceFrames.content[originIndex].zAxis = float3(
+            referenceFrames.setZAxisAt(originIndex, float3(
                 eigenvectors[originIndex*9 + 6],
                 eigenvectors[originIndex*9 + 7],
-                eigenvectors[originIndex*9 + 8]);
+                eigenvectors[originIndex*9 + 8]));
 
             // Zero out directionVotes
             directionVotes.content[2*originIndex + 0] = 0;
@@ -141,6 +141,7 @@ namespace v3 {
         }
         __syncthreads();
 
+        // TODO: Grab a local copy of the reference frame for reuse
         // Compute directional votes
         for (uint32_t pointIndex = threadIdx.x; pointIndex < pointCount; pointIndex += blockDim.x) {
             float3 point = vertexList.at(pointIndex);
@@ -150,9 +151,8 @@ namespace v3 {
                 continue;
             }
 
-            ShapeDescriptor::gpu::LocalReferenceFrame &frame = referenceFrames.content[originIndex];
-            float dotX = dot(frame.xAxis, pointDelta);
-            float dotZ = dot(frame.zAxis, pointDelta);
+            float dotX = dot(referenceFrames.xAxisAt(originIndex), pointDelta);
+            float dotZ = dot(referenceFrames.zAxisAt(originIndex), pointDelta);
             atomicAdd_block(&directionVotes.content[2*originIndex + 0], (dotX > 0.0f) ? 1 : -1);
             atomicAdd_block(&directionVotes.content[2*originIndex + 1], (dotZ > 0.0f) ? 1 : -1);
         }
@@ -160,18 +160,21 @@ namespace v3 {
 
         // Apply direction corrections
         if (threadIdx.x == 0) {
-            ShapeDescriptor::gpu::LocalReferenceFrame &frame = referenceFrames.content[originIndex];
+            float3 xAxis = referenceFrames.xAxisAt(originIndex);
+            float3 zAxis = referenceFrames.zAxisAt(originIndex);
             if (directionVotes[2*originIndex + 0] < 0) {
-                frame.xAxis *= -1.0f;
+                xAxis *= -1.0f;
             }
             if (directionVotes[2*originIndex + 1] < 0) {
-                frame.zAxis *= -1.0f;
+                zAxis *= -1.0f;
             }
-            frame.yAxis = cross(frame.xAxis, frame.zAxis);
+            referenceFrames.setXAxisAt(originIndex, xAxis);
+            referenceFrames.setZAxisAt(originIndex, zAxis);
+            referenceFrames.setYAxisAt(originIndex, cross(xAxis, zAxis));
         }
     }
 
-ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSHOTReferenceFrames(
+ShapeDescriptor::gpu::v3::LocalReferenceFrames computeSHOTReferenceFrames(
     const ShapeDescriptor::gpu::PointCloud& pointcloud,
     const ShapeDescriptor::gpu::array<ShapeDescriptor::OrientedPoint>& imageOrigins,
     const ShapeDescriptor::gpu::array<float>& maxSupportRadius,
@@ -230,7 +233,7 @@ ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSH
 
     // -------------------- Eigenvector disambiguation -------------------
     ShapeDescriptor::gpu::array<int32_t> d_directionVotes(originCount * 2);
-    ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> d_referenceFrames(originCount);
+    ShapeDescriptor::gpu::v3::LocalReferenceFrames d_referenceFrames(originCount);
     // Start disambiguation timing
     auto startDisambiguationTime = std::chrono::high_resolution_clock::now();
 

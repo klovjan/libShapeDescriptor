@@ -131,17 +131,80 @@ namespace ShapeDescriptor {
             float3 zAxis = {0, 0, 1};
         };
     }
-    // namespace gpu {
-    //     namespace v3 {
-    //         struct LocalReferenceFrames {
-    //             uint32_t length;
 
-    //             gpu::array<float3> xAxes;
-    //             gpu::array<float3> yAxes;
-    //             gpu::array<float3> zAxes;
-    //         };
-    //     }
-    // }
+    // Forward declarations for ShapeDescriptor::free()
+    // Needed here for LocalReferenceFrames helper functions
+    template<typename T>
+    void free(cpu::array<T> &arrayToFree);
+    template<typename T>
+    void free(gpu::array<T> &arrayToFree);
+
+    namespace gpu {
+        namespace v3 {
+            struct LocalReferenceFrames {
+                size_t length = 0;
+                gpu::array<float3> xAxes;
+                gpu::array<float3> yAxes;
+                gpu::array<float3> zAxes;
+
+                __host__ __device__ LocalReferenceFrames() {}
+
+                __host__ LocalReferenceFrames(size_t length) {
+                    allocate(length);
+                }
+
+                __host__ void allocate(size_t length) {
+                    CUDA_REGION(
+                        this->length = length;
+                        xAxes = gpu::array<float3>(length);
+                        yAxes = gpu::array<float3>(length);
+                        zAxes = gpu::array<float3>(length);
+                    )
+                }
+
+                __host__ __device__ ShapeDescriptor::gpu::LocalReferenceFrame at(size_t index) const {
+                    ShapeDescriptor::gpu::LocalReferenceFrame frame;
+                    frame.xAxis = xAxes.content[index];
+                    frame.yAxis = yAxes.content[index];
+                    frame.zAxis = zAxes.content[index];
+                    return frame;
+                }
+
+                __device__ float3 xAxisAt(size_t index) const {
+                    return xAxes.content[index];
+                }
+
+                __device__ float3 yAxisAt(size_t index) const {
+                    return yAxes.content[index];
+                }
+
+                __device__ float3 zAxisAt(size_t index) const {
+                    return zAxes.content[index];
+                }
+
+                __device__ void setXAxisAt(size_t index, float3 axis) {
+                    xAxes.content[index] = axis;
+                }
+
+                __device__ void setYAxisAt(size_t index, float3 axis) {
+                    yAxes.content[index] = axis;
+                }
+
+                __device__ void setZAxisAt(size_t index, float3 axis) {
+                    zAxes.content[index] = axis;
+                }
+
+                __host__ void free() {
+                    CUDA_REGION(
+                        ShapeDescriptor::free(xAxes);
+                        ShapeDescriptor::free(yAxes);
+                        ShapeDescriptor::free(zAxes);
+                        length = 0;
+                    )
+                }
+            };
+        }
+    }
 
     struct QUICCIDescriptorFileHeader {
         std::array<char, 5> fileID;
@@ -652,7 +715,7 @@ namespace ShapeDescriptor {
             uint32_t nMatrices);
     }
     namespace v3 {
-        ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSHOTReferenceFrames(
+        ShapeDescriptor::gpu::v3::LocalReferenceFrames computeSHOTReferenceFrames(
             const ShapeDescriptor::gpu::PointCloud& pointcloud,
             const ShapeDescriptor::gpu::array<OrientedPoint>& imageOrigins,
             const ShapeDescriptor::gpu::array<float>& maxSupportRadius,
