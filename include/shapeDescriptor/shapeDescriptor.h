@@ -131,6 +131,17 @@ namespace ShapeDescriptor {
             float3 zAxis = {0, 0, 1};
         };
     }
+    // namespace gpu {
+    //     namespace v3 {
+    //         struct LocalReferenceFrames {
+    //             uint32_t length;
+
+    //             gpu::array<float3> xAxes;
+    //             gpu::array<float3> yAxes;
+    //             gpu::array<float3> zAxes;
+    //         };
+    //     }
+    // }
 
     struct QUICCIDescriptorFileHeader {
         std::array<char, 5> fileID;
@@ -630,6 +641,17 @@ namespace ShapeDescriptor {
             uint32_t nMatrices);
     }
     namespace v2 {
+        ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSHOTReferenceFrames(
+            const ShapeDescriptor::gpu::PointCloud& pointcloud,
+            const ShapeDescriptor::gpu::array<OrientedPoint>& imageOrigins,
+            const ShapeDescriptor::gpu::array<float>& maxSupportRadius,
+            SHOTExecutionTimes* executionTimes);
+
+        ShapeDescriptor::gpu::array<float> computeEigenVectorsMultiple(
+            ShapeDescriptor::gpu::array<float> d_columnMajorMatrices,
+            uint32_t nMatrices);
+    }
+    namespace v3 {
         ShapeDescriptor::gpu::array<ShapeDescriptor::gpu::LocalReferenceFrame> computeSHOTReferenceFrames(
             const ShapeDescriptor::gpu::PointCloud& pointcloud,
             const ShapeDescriptor::gpu::array<OrientedPoint>& imageOrigins,
