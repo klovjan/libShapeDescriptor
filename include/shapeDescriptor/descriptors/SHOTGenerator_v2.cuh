@@ -45,11 +45,18 @@ namespace {
 
             const float3 originVertex = descriptorOrigins.content[descriptorIndex].vertex;
 
-            // Set up shared memory for this block's descriptor
+            // Set up shared memory for this block's descriptor and LRF
             __shared__ ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS> localDescriptor;
             const uint32_t binCount = localDescriptor.totalBinCount;
             for (uint32_t binIndex = threadIdx.x; binIndex < binCount; binIndex += blockDim.x) {
                 localDescriptor.contents[binIndex] = 0;
+            }
+
+            __shared__ ShapeDescriptor::gpu::LocalReferenceFrame localLRF;
+            if (threadIdx.x == 0) {
+                localLRF.xAxis = localReferenceFrames.content[descriptorIndex].xAxis;
+                localLRF.yAxis = localReferenceFrames.content[descriptorIndex].yAxis;
+                localLRF.zAxis = localReferenceFrames.content[descriptorIndex].zAxis;
             }
             __syncthreads();
 
@@ -70,9 +77,9 @@ namespace {
                 // Transforming descriptor coordinate system to the origin
                 // TODO: Fytt ut av for-loop
                 const float3 relativeSamplePoint = {
-                    dot(localReferenceFrames.content[descriptorIndex].xAxis, translated),
-                    dot(localReferenceFrames.content[descriptorIndex].yAxis, translated),
-                    dot(localReferenceFrames.content[descriptorIndex].zAxis, translated)
+                    dot(localLRF.xAxis, translated),
+                    dot(localLRF.yAxis, translated),
+                    dot(localLRF.zAxis, translated)
                 };
 
                 float2 horizontalDirection = {relativeSamplePoint.x, relativeSamplePoint.y};
@@ -94,7 +101,7 @@ namespace {
                 verticalDirection = normalize(verticalDirection);
 
                 const float3 sampleNormal = normalize(pointCloud.normals.at(sampleIndex));
-                float normalCosine = dot(sampleNormal, localReferenceFrames.content[descriptorIndex].zAxis);
+                float normalCosine = dot(sampleNormal, localLRF.zAxis);
 
                 // For the interpolations we'll use the order used in the paper
                 // a) Interpolation on normal cosines
