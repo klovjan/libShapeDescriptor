@@ -299,7 +299,7 @@ __device__ void writeQUICCImage(
 }
 
 template<unsigned int pixelDifferenceThreshold>
-__launch_bounds__(RASTERISATION_WARP_SIZE, 2) __global__ void generateQuickIntersectionCountChangeImage(
+__global__ void generateQuickIntersectionCountChangeImage(
         ShapeDescriptor::QUICCIDescriptor* descriptors,
         QUICCIMesh mesh)
 {

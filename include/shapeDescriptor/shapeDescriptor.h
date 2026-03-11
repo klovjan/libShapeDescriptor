@@ -725,6 +725,17 @@ namespace ShapeDescriptor {
             ShapeDescriptor::gpu::array<float> d_columnMajorMatrices,
             uint32_t nMatrices);
     }
+    namespace v4 {
+        ShapeDescriptor::gpu::v3::LocalReferenceFrames computeSHOTReferenceFrames(
+            const ShapeDescriptor::gpu::PointCloud& pointcloud,
+            const ShapeDescriptor::gpu::array<OrientedPoint>& imageOrigins,
+            const ShapeDescriptor::gpu::array<float>& maxSupportRadius,
+            SHOTExecutionTimes* executionTimes);
+
+        ShapeDescriptor::gpu::array<float> computeEigenVectorsMultiple(
+            ShapeDescriptor::gpu::array<float> d_columnMajorMatrices,
+            uint32_t nMatrices);
+    }
 
     cpu::PointCloud sampleMesh(cpu::Mesh mesh, size_t sampleCount, size_t randomSamplingSeed);
 

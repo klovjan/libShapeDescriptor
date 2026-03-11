@@ -119,7 +119,6 @@ namespace v3 {
 
         if (threadIdx.x == 0) {
             // Initialise referenceFrames to eigenVectors' current values
-            // NOTE: Probably wildly inefficient
             referenceFrames.setXAxisAt(originIndex, float3(
                 eigenvectors[originIndex*9 + 0],
                 eigenvectors[originIndex*9 + 1],

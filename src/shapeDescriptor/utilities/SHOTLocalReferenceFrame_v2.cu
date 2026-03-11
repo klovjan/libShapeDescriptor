@@ -120,7 +120,6 @@ namespace v2 {
 
         if (threadIdx.x == 0) {
             // Initialise referenceFrames to eigenVectors' current values
-            // NOTE: Probably wildly inefficient
             referenceFrames.content[originIndex].xAxis = float3(
                 eigenvectors[originIndex*9 + 0],
                 eigenvectors[originIndex*9 + 1],

@@ -236,7 +236,7 @@ __device__ __inline__ void rasteriseTriangle(
 	}
 }
 
-__launch_bounds__(RASTERISATION_WARP_SIZE, 2) __global__ void generateRadialIntersectionCountImage(
+__global__ void generateRadialIntersectionCountImage(
         ShapeDescriptor::RICIDescriptor* descriptors,
         RICIMesh mesh)
 {
