@@ -237,7 +237,7 @@ ShapeDescriptor::gpu::v3::LocalReferenceFrames computeSHOTReferenceFrames(
     auto startDisambiguationTime = std::chrono::high_resolution_clock::now();
 
     // Disambiguate eigenvector directions, and put results in referenceFrames array
-    disambiguateEigenvectors<<<originCount, 512>>>(pointcloud, imageOrigins, maxSupportRadius, d_eigenvectors, d_directionVotes, d_referenceFrames);
+    disambiguateEigenvectors<<<originCount, 416>>>(pointcloud, imageOrigins, maxSupportRadius, d_eigenvectors, d_directionVotes, d_referenceFrames);
 
     // Synchronize and check if any errors occurred
     err = cudaDeviceSynchronize();
