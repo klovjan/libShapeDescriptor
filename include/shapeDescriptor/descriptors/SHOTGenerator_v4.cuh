@@ -194,28 +194,29 @@ namespace {
         __global__ void normalizeSHOTDescriptors(
                 const ShapeDescriptor::gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> descriptors)
         {
-            if (threadIdx.x != 0) {
-                return;
-            }
-
             const uint32_t descriptorIndex = blockIdx.x;
             auto &descriptor = descriptors.content[descriptorIndex];
             constexpr uint32_t binCount = ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>::totalBinCount;
 
-            float squaredSum = 0.0f;
-            for (uint32_t binIndex = 0; binIndex < binCount; ++binIndex) {
-                float total = descriptor.contents[binIndex];
-                if (isnan(total)) {
-                    descriptor.contents[binIndex] = 0.0f;
-                    total = 0.0f;
+            if (threadIdx.x <= 31) {
+                // Compute squared sum in parallel using warp reduction
+                float threadSquaredSum = 0;
+                for (uint32_t binIndex = threadIdx.x; binIndex < binCount; binIndex += 32) {
+                    float total = descriptor.contents[binIndex];
+                    if (isnan(total)) {
+                        descriptor.contents[binIndex] = 0;
+                        total = 0;
+                    }
+                    threadSquaredSum += total * total;
                 }
-                squaredSum += total * total;
-            }
+                float squaredSum = ShapeDescriptor::warpAllReduceSum(threadSquaredSum);
 
-            if (squaredSum > 0.0f) {
-                float invLength = rsqrtf(squaredSum);
-                for (uint32_t binIndex = 0; binIndex < binCount; binIndex++) {
-                    descriptor.contents[binIndex] *= invLength;
+                // Normalize descriptor in parallel
+                if (squaredSum > 0) {
+                    float totalLength = sqrt(squaredSum);
+                    for (uint32_t binIndex = threadIdx.x; binIndex < binCount; binIndex += 32) {
+                        descriptor.contents[binIndex] /= totalLength;
+                    }
                 }
             }
         }
@@ -238,7 +239,7 @@ namespace {
         auto startDescriptorTime = std::chrono::high_resolution_clock::now();
         // Compute SHOT descriptors
         computeGeneralisedSHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<originCount, 416>>>(descriptorOrigins, pointCloud, descriptors, referenceFrames, supportRadii);
-        normalizeSHOTDescriptors<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<originCount, 1>>>(descriptors);
+        normalizeSHOTDescriptors<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<originCount, 32>>>(descriptors);
 
         // Synchronize and check if any errors occurred
         cudaError_t err = cudaDeviceSynchronize();
