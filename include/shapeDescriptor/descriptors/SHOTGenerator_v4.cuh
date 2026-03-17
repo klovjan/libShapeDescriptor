@@ -191,7 +191,7 @@ namespace {
         }
 
         template<uint32_t ELEVATION_DIVISIONS = 2, uint32_t RADIAL_DIVISIONS = 2, uint32_t AZIMUTH_DIVISIONS = 8, uint32_t INTERNAL_HISTOGRAM_BINS = 11>
-        __global__ void normalizeSHOTDescriptors(
+        __global__ void normaliseSHOTDescriptors(
                 const ShapeDescriptor::gpu::array<ShapeDescriptor::SHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS>> descriptors)
         {
             const uint32_t descriptorIndex = blockIdx.x;
@@ -202,16 +202,16 @@ namespace {
                 // Compute squared sum in parallel using warp reduction
                 float threadSquaredSum = 0;
                 for (uint32_t binIndex = threadIdx.x; binIndex < binCount; binIndex += 32) {
-                    float total = descriptor.contents[binIndex];
-                    if (isnan(total)) {
+                    float binValue = descriptor.contents[binIndex];
+                    if (isnan(binValue)) {
                         descriptor.contents[binIndex] = 0;
-                        total = 0;
+                        binValue = 0;
                     }
-                    threadSquaredSum += total * total;
+                    threadSquaredSum += binValue * binValue;
                 }
                 float squaredSum = ShapeDescriptor::warpAllReduceSum(threadSquaredSum);
 
-                // Normalize descriptor in parallel
+                // Normalise descriptor in parallel
                 if (squaredSum > 0) {
                     float totalLength = sqrt(squaredSum);
                     for (uint32_t binIndex = threadIdx.x; binIndex < binCount; binIndex += 32) {
@@ -239,7 +239,7 @@ namespace {
         auto startDescriptorTime = std::chrono::high_resolution_clock::now();
         // Compute SHOT descriptors
         computeGeneralisedSHOTDescriptor<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<originCount, 416>>>(descriptorOrigins, pointCloud, descriptors, referenceFrames, supportRadii);
-        normalizeSHOTDescriptors<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<originCount, 32>>>(descriptors);
+        normaliseSHOTDescriptors<ELEVATION_DIVISIONS, RADIAL_DIVISIONS, AZIMUTH_DIVISIONS, INTERNAL_HISTOGRAM_BINS><<<originCount, 32>>>(descriptors);
 
         // Synchronize and check if any errors occurred
         cudaError_t err = cudaDeviceSynchronize();
